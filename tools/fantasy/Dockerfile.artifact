@@ -1,0 +1,11 @@
+# Package an already compiled linux/amd64 binary. No compilation on production.
+# Compare upstream runtime dependencies before selecting RUNTIME_IMAGE.
+ARG RUNTIME_IMAGE
+FROM ${RUNTIME_IMAGE}
+ARG VERSION
+ARG COMMIT
+LABEL org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}"
+COPY --chmod=755 sub2api /app/sub2api
+COPY --chown=1000:1000 resources/ /app/resources/
+COPY --chmod=755 docker-entrypoint.sh /app/docker-entrypoint.sh
