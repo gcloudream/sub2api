@@ -44,7 +44,6 @@
 
 <script lang="ts">
 let dialogIdCounter = 0
-const openDialogs = new Set<string>()
 </script>
 
 <script setup lang="ts">
@@ -116,12 +115,6 @@ const handleEscape = (event: KeyboardEvent) => {
   }
 }
 
-const updateScrollLock = (isOpen: boolean) => {
-  if (isOpen) openDialogs.add(dialogId)
-  else openDialogs.delete(dialogId)
-  document.body.classList.toggle('modal-open', openDialogs.size > 0)
-}
-
 // Prevent body scroll when modal is open and manage focus
 watch(
   () => props.show,
@@ -130,7 +123,7 @@ watch(
       // 保存当前焦点元素
       previousActiveElement = document.activeElement as HTMLElement
       // 使用CSS类而不是直接操作style,更易于管理多个对话框
-      updateScrollLock(true)
+      document.body.classList.add('modal-open')
 
       // 等待DOM更新后设置焦点到对话框
       await nextTick()
@@ -144,7 +137,7 @@ watch(
         firstFocusable?.focus()
       }
     } else {
-      updateScrollLock(false)
+      document.body.classList.remove('modal-open')
       // 恢复之前的焦点
       if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
         previousActiveElement.focus()
@@ -162,6 +155,6 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('keydown', handleEscape)
   // 确保组件卸载时移除滚动锁定
-  updateScrollLock(false)
+  document.body.classList.remove('modal-open')
 })
 </script>

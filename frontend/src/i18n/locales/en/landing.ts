@@ -1,4 +1,18 @@
 export default {
+  fantasy: {
+    "eyebrow": "INTELLIGENCE, CONSIDERED.",
+    "intro": "One gateway. Every possibility.",
+    "description": "Connect your available models through one interface. Manage keys, usage and quotas with clarity.",
+    "services": "Clarity in every call.",
+    "register": "Create account",
+    "authTitle": "An entrance to imagination.",
+    "authDescription": "One gateway for your models. A considered experience, from first connection to everyday management.",
+    "preview": "Isolated preview · Demonstration data only",
+    "navOverview": "Overview & usage",
+    "navAccess": "Access & resources",
+    "navBilling": "Customers & billing",
+    "navSystem": "System & settings"
+},
   batchImageGuide: {
     title: 'Batch Image Generation',
     description: 'Submit multiple prompts in one job and download the generated images when complete'

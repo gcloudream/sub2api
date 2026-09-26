@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+<title id="title">幻想家</title><desc id="desc">An abstract F forms a light gate, with a four-point champagne star.</desc>
+<defs><linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f0dfb8"/><stop offset=".5" stop-color="#c9aa71"/><stop offset="1" stop-color="#947140"/></linearGradient></defs>
+<rect x="2" y="2" width="124" height="124" rx="28" fill="#111418" stroke="#c9aa71" stroke-opacity=".35"/>
+<path d="M35 97V33h55M47 97V45h31M47 65h27" fill="none" stroke="#c9aa71" stroke-width="5" stroke-linecap="square"/>
+<path d="M91 52l3.8 11.2L106 67l-11.2 3.8L91 82l-3.8-11.2L76 67l11.2-3.8z" fill="#c9aa71"/>
+<path d="M31 105h69" stroke="#c9aa71" stroke-opacity=".3"/>
+</svg>

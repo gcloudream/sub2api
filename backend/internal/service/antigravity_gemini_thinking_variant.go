@@ -3,8 +3,6 @@ package service
 import (
 	"encoding/json"
 	"strings"
-
-	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 )
 
 // Gemini 原生请求（/v1beta/models/{model}:generateContent 等）经 Antigravity 账号转发时，
@@ -85,29 +83,6 @@ func geminiThinkingLevelFromBody(body []byte) string {
 	}
 }
 
-// geminiThinkingLevelFromClaudeThinking 用 Claude Messages 协议的 thinking 配置推导档位，
-// 阈值与 geminiThinkingLevelFromBody 保持一致，使同一请求无论走 Gemini 原生还是
-// Chat Completions / Messages 兼容层都落到同一个上游变体。
-func geminiThinkingLevelFromClaudeThinking(thinking *antigravity.ThinkingConfig) string {
-	if thinking == nil {
-		return "high"
-	}
-	if strings.EqualFold(strings.TrimSpace(thinking.Type), "disabled") {
-		return "low"
-	}
-	budget := thinking.BudgetTokens
-	switch {
-	case budget <= 0:
-		return "high" // 动态思考 / 未指定预算
-	case budget <= geminiThinkingBudgetLowMax:
-		return "low"
-	case budget <= geminiThinkingBudgetMediumMax:
-		return "medium"
-	default:
-		return "high"
-	}
-}
-
 // accountRawModelMappingHasKey 判断 key 是否由用户写在账号 credentials.model_mapping 里
 // （而不是 resolveModelMapping 运行时补进来的默认透传条目）。
 func accountRawModelMappingHasKey(account *Account, key string) bool {
@@ -122,13 +97,6 @@ func accountRawModelMappingHasKey(account *Account, key string) bool {
 // resolveGeminiThinkingVariant 为裸 Gemini 模型名挑选账号映射表里存在的思考深度变体。
 // 返回 (映射后的上游模型名, 是否命中)。未命中时调用方应回退到常规 getMappedModel 流程。
 func resolveGeminiThinkingVariant(account *Account, requestedModel string, body []byte) (string, bool) {
-	return resolveGeminiThinkingVariantForLevel(account, requestedModel, geminiThinkingLevelFromBody(body))
-}
-
-// resolveGeminiThinkingVariantForLevel 是 resolveGeminiThinkingVariant 的协议无关内核：
-// 调用方负责按自身协议推导 preferred 档位（Gemini 原生读 generationConfig.thinkingConfig，
-// Claude/OpenAI 兼容层读 thinking.budget_tokens），此处只做映射查找与降级。
-func resolveGeminiThinkingVariantForLevel(account *Account, requestedModel string, preferred string) (string, bool) {
 	if account == nil {
 		return "", false
 	}
@@ -152,9 +120,7 @@ func resolveGeminiThinkingVariantForLevel(account *Account, requestedModel strin
 		}
 	}
 
-	if preferred == "" {
-		preferred = "high"
-	}
+	preferred := geminiThinkingLevelFromBody(body)
 	order := []string{preferred}
 	for _, level := range []string{"high", "medium", "low", "tiered"} {
 		if level != preferred {

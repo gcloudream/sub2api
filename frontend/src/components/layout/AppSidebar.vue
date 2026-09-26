@@ -24,6 +24,7 @@
         >
           {{ siteName }}
         </router-link>
+        <span class="lux-eyebrow text-[8px]">AI API GATEWAY</span>
         <!-- Version Badge -->
         <VersionBadge :version="siteVersion" />
       </div>
@@ -936,7 +937,7 @@ function handleGroupClick(item: NavItem) {
 const savedTheme = localStorage.getItem('theme')
 if (
   savedTheme === 'dark' ||
-  (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)
+  !savedTheme
 ) {
   isDark.value = true
   document.documentElement.classList.add('dark')

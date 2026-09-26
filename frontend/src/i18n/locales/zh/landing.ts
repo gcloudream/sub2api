@@ -1,4 +1,18 @@
 export default {
+  fantasy: {
+    "eyebrow": "INTELLIGENCE, CONSIDERED.",
+    "intro": "统一接入与管理 AI 模型服务",
+    "description": "通过统一接口连接已接入的模型，集中管理密钥、用量与额度。让复杂的调用，回归清晰。",
+    "services": "为每一次调用，保留掌控力",
+    "register": "创建账户",
+    "authTitle": "让想象，拥有入口。",
+    "authDescription": "一个入口，连接多种模型。从接入到管理，让每一步都清晰有序。",
+    "preview": "独立预览环境 · 仅含演示数据",
+    "navOverview": "概览与用量",
+    "navAccess": "接入与资源",
+    "navBilling": "客户与账单",
+    "navSystem": "系统与设置"
+},
   batchImageGuide: {
     title: '图片批量生成',
     description: '一次提交多条提示词，任务完成后可统一下载图片结果'
