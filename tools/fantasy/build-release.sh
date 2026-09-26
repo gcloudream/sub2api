@@ -6,6 +6,7 @@ version=${1:?Usage: build-release.sh VERSION OUTPUT_DIRECTORY}
 output=${2:?Provide an output directory outside the source checkout}
 mkdir -p "$output"
 output=$(cd "$output" && pwd)
+test -z "$(ls -A "$output")" || { echo "Use a new, empty output directory" >&2; exit 1; }
 case "$output/" in "$root/"*) echo 'Output must be outside the checkout' >&2; exit 1;; esac
 cd "$root"
 test -z "$(git status --porcelain)" || { echo 'Commit source changes before building' >&2; exit 1; }

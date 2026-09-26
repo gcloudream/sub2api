@@ -6,7 +6,7 @@
 
 主要定制入口：`frontend/src/styles/luxury.css`、`BrandPortal.vue`、`ThemeToggle.vue`、`HomeView.vue`、`AuthLayout.vue`、Tailwind 颜色配置、品牌图标和默认语言。业务页面只改样式；后续优先在这些入口维护品牌外观。首页定制仍可能与上游首页改动发生冲突，必须检查，不能保证所有升级都自动无冲突。
 
-本机维护仓库：`fantasy-maintenance/source`；服务器副本：`/home/ubuntu/sub2api-maintenance/upstream`。当前并未创建 GitHub Fork。服务器仓库与本机副本都须保存提交；另外保留源码归档。数据库、密码、运行配置与备份不得进入 Git。
+本机维护仓库：`fantasy-maintenance/source`；服务器副本：`/home/ubuntu/sub2api-maintenance/upstream`。GitHub Fork：<https://github.com/gcloudream/sub2api/tree/fantasy-ui>，定制分支为 `fantasy-ui`，`upstream` 指向官方仓库。服务器仓库与本机副本都须保存提交；另外保留源码归档。数据库、密码、运行配置与备份不得进入 Git。
 
 ## 更新官方代码
 
@@ -18,7 +18,7 @@
 ## 镜像与预览
 
 - 禁止在 4GB 正式服务器上运行 Node/Go 编译或同时启动多个构建。服务器只做文件校验和镜像打包。
-- 使用 `tools/fantasy/Dockerfile.artifact` 打包产物。`RUNTIME_IMAGE` 必须指定已验证的不可变镜像 ID/摘要；每次升级先比较官方运行依赖。v0.2.5 到 v0.2.8 的官方 Dockerfile 和入口脚本相同，因此本次可以复用已构建的官方 v0.2.5 运行环境，仅替换新版完整应用程序及官方资源。
+- 使用 `tools/fantasy/Dockerfile.artifact` 打包产物。`RUNTIME_IMAGE` 必须指定已验证的运行镜像；使用本地标签时，打包前必须核对其实际镜像 ID 与发布回执相同；每次升级先比较官方运行依赖。v0.2.5 到 v0.2.8 的官方 Dockerfile 和入口脚本相同，因此本次可以复用已构建的官方 v0.2.5 运行环境，仅替换新版完整应用程序及官方资源。
 - 采用带版本及提交号的镜像名，不用 `latest`。构建命令示例：`docker build --network=none --build-arg RUNTIME_IMAGE=已验证镜像ID --build-arg VERSION=版本 --build-arg COMMIT=提交号 -t fantasy-sub2api:ui-版本-提交号 产物目录`。
 - 先备份 `/home/ubuntu/fantasy-preview`，只替换预览应用容器。预览使用独立数据库、缓存及 8081 端口。
 - 验证健康检查、日志中的迁移结果、登录/注册页面、品牌样式与主题切换。登录后检查用户及管理员主要页面；无法实际验证的路径在回执中注明。
@@ -34,3 +34,9 @@
 ## 2026-09-26 构建故障
 
 在 4GB 云主机上并行编译曾耗尽 2GB 交换空间，负载超过 40，正式站健康检查超时。已停止构建并正常重启；恢复后应用、PostgreSQL、Redis 健康，公网健康检查返回 200。Docker Engine 为 29.1.3，安装 Buildx 0.30.1 即可解决原先缺少构建组件的问题，不需要更换 Engine 软件源。后续构建全部移到工作站。
+
+## 本次发布
+
+0.2.8 应用镜像：`fantasy-sub2api:ui-v0.2.8-f6fb3be`，源码提交 `f6fb3bef635b0ff6fca3c0887b87eeb942a6df8a`。运行环境基于本地官方镜像 `sub2api:official-v0.2.5`，已核对 ID 为 `sha256:12b22980426b197703815d05c526382cf7593890270a647302a913949ca3d79f`，两个官方版本的 Dockerfile 和入口脚本无差异。
+
+本机完成 83 项 UI 测试、3 项 i18n 构建检查、TypeScript 检查、前端构建、Go 1.27 Linux amd64 编译。预览站完成页面及管理员会话验收；未新建真实用户、未消耗上游模型调用额度。具体正式站结果保存在本机 `fantasy-maintenance/receipts` 中。
