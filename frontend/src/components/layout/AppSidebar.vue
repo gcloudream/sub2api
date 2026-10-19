@@ -150,7 +150,7 @@
       <!-- Theme Toggle -->
       <button
         @click="toggleTheme"
-        class="sidebar-link mb-2 w-full"
+        class="sidebar-link w-full lg:mb-2"
         :class="{ 'sidebar-link-collapsed': sidebarCollapsed }"
         :title="sidebarCollapsed ? (isDark ? t('nav.lightMode') : t('nav.darkMode')) : undefined"
       >
@@ -161,10 +161,10 @@
         }}</span>
       </button>
 
-      <!-- Collapse Button -->
+      <!-- Collapse Button (desktop only; the mobile drawer is dismissed via the overlay) -->
       <button
         @click="toggleSidebar"
-        class="sidebar-link w-full"
+        class="sidebar-link hidden w-full lg:flex"
         :class="{ 'sidebar-link-collapsed': sidebarCollapsed }"
         :title="sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
       >
@@ -179,7 +179,7 @@
   <transition name="fade">
     <div
       v-if="mobileOpen"
-      class="fixed inset-0 z-30 bg-black/50 lg:hidden"
+      class="fixed inset-0 z-30 bg-black/70 backdrop-blur-sm lg:hidden"
       @click="closeMobile"
     ></div>
   </transition>

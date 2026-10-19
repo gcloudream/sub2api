@@ -1,5 +1,5 @@
 <template>
-  <!-- Row 1: Core Stats -->
+  <!-- Row 1: Core Stats (secondary lines hidden on phones) -->
   <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
     <!-- Balance -->
     <div v-if="!isSimple" class="card p-4">
@@ -12,7 +12,7 @@
         <div>
           <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.balance') }}</p>
           <p class="text-xl font-bold text-emerald-600 dark:text-emerald-400">${{ formatBalance(balance) }}</p>
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('common.available') }}</p>
+          <p class="hidden text-xs text-gray-500 dark:text-gray-400 md:block">{{ t('common.available') }}</p>
         </div>
       </div>
     </div>
@@ -26,7 +26,7 @@
         <div>
           <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.apiKeys') }}</p>
           <p class="text-xl font-bold text-gray-900 dark:text-white">{{ stats?.total_api_keys || 0 }}</p>
-          <p class="text-xs text-green-600 dark:text-green-400">{{ stats?.active_api_keys || 0 }} {{ t('common.active') }}</p>
+          <p class="hidden text-xs text-green-600 dark:text-green-400 md:block">{{ stats?.active_api_keys || 0 }} {{ t('common.active') }}</p>
         </div>
       </div>
     </div>
@@ -40,7 +40,7 @@
         <div>
           <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.todayRequests') }}</p>
           <p class="text-xl font-bold text-gray-900 dark:text-white">{{ stats?.today_requests || 0 }}</p>
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('common.total') }}: {{ formatNumber(stats?.total_requests || 0) }}</p>
+          <p class="hidden text-xs text-gray-500 dark:text-gray-400 md:block">{{ t('common.total') }}: {{ formatNumber(stats?.total_requests || 0) }}</p>
         </div>
       </div>
     </div>
@@ -55,9 +55,9 @@
           <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.todayCost') }}</p>
           <p class="text-xl font-bold text-gray-900 dark:text-white">
             <span class="text-purple-600 dark:text-purple-400" :title="t('dashboard.actual')">${{ formatCost(stats?.today_actual_cost || 0) }}</span>
-            <span class="text-sm font-normal text-gray-400 dark:text-gray-500" :title="t('dashboard.standard')"> / ${{ formatCost(stats?.today_cost || 0) }}</span>
+            <span class="hidden text-sm font-normal text-gray-400 dark:text-gray-500 md:inline" :title="t('dashboard.standard')"> / ${{ formatCost(stats?.today_cost || 0) }}</span>
           </p>
-          <p class="text-xs">
+          <p class="hidden text-xs md:block">
             <span class="text-gray-500 dark:text-gray-400">{{ t('common.total') }}: </span>
             <span class="text-purple-600 dark:text-purple-400" :title="t('dashboard.actual')">${{ formatCost(stats?.total_actual_cost || 0) }}</span>
             <span class="text-gray-400 dark:text-gray-500" :title="t('dashboard.standard')"> / ${{ formatCost(stats?.total_cost || 0) }}</span>
@@ -67,8 +67,8 @@
     </div>
   </div>
 
-  <!-- Row 2: Token Stats -->
-  <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+  <!-- Row 2: Token Stats (hidden on phones to keep the mobile dashboard compact) -->
+  <div class="hidden grid-cols-2 gap-4 md:grid lg:grid-cols-4">
     <!-- Today Tokens -->
     <div class="card p-4">
       <div class="flex items-center gap-3">
@@ -133,7 +133,7 @@
   </div>
 
   <!-- Row 3: Per-platform breakdown -->
-  <div v-if="!isSimple && platformCards.length > 0" class="card p-4">
+  <div v-if="!isSimple && platformCards.length > 0" class="card hidden p-4 md:block">
     <div class="mb-3 flex items-center justify-between">
       <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('dashboard.platformBreakdown') }}</h3>
       <span class="text-xs text-gray-500 dark:text-gray-400">
