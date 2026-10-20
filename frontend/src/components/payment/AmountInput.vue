@@ -11,18 +11,18 @@
           :key="preset.blindBox ? 'blind-box' : preset.amount"
           type="button"
           :class="[
-            'min-w-0 rounded-lg border-2 px-2 py-3 text-center font-medium transition-colors sm:px-4',
+            'flex h-[52px] min-w-0 items-center justify-center rounded-lg border-2 px-2 text-center text-base font-medium leading-5 transition-colors sm:px-4',
             modelValue === preset.amount && (rechargeMode === 'blind_box') === preset.blindBox
               ? 'border-primary-500 bg-primary-50 text-primary-700 dark:border-primary-400 dark:bg-primary-900/40 dark:text-primary-300'
               : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-dark-500',
           ]"
           @click="selectAmount(preset.amount, preset.blindBox)"
         >
-          <span class="inline-flex max-w-full flex-wrap items-baseline justify-center gap-x-1.5 gap-y-0.5">
+          <span class="inline-flex max-w-full flex-wrap items-baseline justify-center gap-x-1.5">
             <span>{{ preset.amount }}</span>
             <template v-if="preset.blindBox && blindBox">
-              <span class="text-xs">{{ t('payment.blindBox.name') }}</span>
-              <span class="w-full text-xs font-normal">{{ blindBox.min }}–{{ blindBox.max }}</span>
+              <span class="text-xs leading-3">{{ t('payment.blindBox.name') }}</span>
+              <span class="text-xs font-normal leading-3">{{ blindBox.min }}–{{ blindBox.max }}</span>
             </template>
             <span
               v-if="!preset.blindBox && bonusPercent(preset.amount) > 0"
