@@ -375,6 +375,47 @@ describe('PaymentView subscription plan grid', () => {
 })
 
 describe('PaymentView recharge rate preview', () => {
+  it('previews the API bonus for custom amounts while keeping the charged amount unchanged', async () => {
+    vi.useRealTimers()
+    routeState.path = '/purchase'
+    routeState.query = {}
+    window.localStorage.clear()
+    appStoreState.setPublicSettings({ subscription_enabled: false })
+    getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture({
+      balance_recharge_multiplier: 6,
+      recharge_bonus_tiers: [{ amount: 20, bonus_percent: 5 }],
+    }))
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+    const input = wrapper.getComponent(AmountInput)
+    expect(input.props('bonusTiers')).toEqual([{ amount: 20, bonus_percent: 5 }])
+    input.vm.$emit('update:modelValue', 20)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('$120.00')
+    expect(wrapper.text()).toContain('+$6.00')
+    expect(wrapper.text()).toContain('$126.00')
+    const payButton = wrapper.findAll('button').find(button => button.text().includes('payment.createOrder'))
+    expect(payButton?.text()).toContain(formatPaymentAmount(20, 'CNY'))
+    expect(payButton?.text()).not.toContain('126')
+
+    input.vm.$emit('update:modelValue', 20.01)
+    await flushPromises()
+    expect(wrapper.text()).toContain('$120.06')
+    expect(wrapper.text()).not.toContain('+$6.00')
+    expect(wrapper.text()).not.toContain('$126.00')
+    wrapper.unmount()
+    appStoreState.setPublicSettings(undefined)
+  })
+
   it('uses the selected payment method currency in both locale templates', async () => {
     translate.mockClear()
     routeState.path = '/purchase'

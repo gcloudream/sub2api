@@ -315,6 +315,8 @@ export default {
     amountLabel: '充值金额',
     paymentAmount: '支付金额',
     creditedBalance: '到账余额',
+    baseCredit: '基础额度',
+    extraBonus: '额外赠送{percent}%',
     quickAmounts: '快捷金额',
     customAmount: '自定义金额',
     enterAmount: '输入金额',

@@ -9,6 +9,25 @@ import (
 
 const defaultBalanceRechargeMultiplier = 1.0
 
+// RechargeBonusTier grants extra balance for an exact recharge amount. Percent
+// values are whole percentages (5 means an additional 5% of the base credit).
+type RechargeBonusTier struct {
+	Amount       float64 `json:"amount"`
+	BonusPercent float64 `json:"bonus_percent"`
+}
+
+// GetRechargeBonusTiers returns the same server-owned offers used to price new
+// balance orders. A fresh slice prevents callers from changing pricing rules.
+func GetRechargeBonusTiers() []RechargeBonusTier {
+	return []RechargeBonusTier{
+		{Amount: 20, BonusPercent: 5},
+		{Amount: 50, BonusPercent: 7},
+		{Amount: 100, BonusPercent: 10},
+		{Amount: 200, BonusPercent: 12},
+		{Amount: 500, BonusPercent: 15},
+	}
+}
+
 func normalizeBalanceRechargeMultiplier(multiplier float64) float64 {
 	if math.IsNaN(multiplier) || math.IsInf(multiplier, 0) || multiplier <= 0 {
 		return defaultBalanceRechargeMultiplier
@@ -26,10 +45,18 @@ func normalizeSubscriptionUSDToCNYRate(rate float64) float64 {
 }
 
 func calculateCreditedBalance(paymentAmount, multiplier float64) float64 {
-	return decimal.NewFromFloat(paymentAmount).
+	amount := decimal.NewFromFloat(paymentAmount)
+	baseCredit := amount.
 		Mul(decimal.NewFromFloat(normalizeBalanceRechargeMultiplier(multiplier))).
-		Round(2).
-		InexactFloat64()
+		Round(2)
+	for _, tier := range GetRechargeBonusTiers() {
+		// Match before rounding: nearby custom amounts must not inherit a tier.
+		if amount.Equal(decimal.NewFromFloat(tier.Amount)) {
+			bonus := baseCredit.Mul(decimal.NewFromFloat(tier.BonusPercent)).Div(decimal.NewFromInt(100)).Round(2)
+			return baseCredit.Add(bonus).InexactFloat64()
+		}
+	}
+	return baseCredit.InexactFloat64()
 }
 
 func calculateGatewayRefundAmount(orderAmount, payAmount, refundAmount float64, currency string) float64 {

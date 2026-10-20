@@ -60,6 +60,11 @@ export interface MethodLimitsResponse {
   global_max: number  // widest max across all methods; 0 = no maximum
 }
 
+export interface RechargeBonusTier {
+  amount: number
+  bonus_percent: number
+}
+
 /** Response from /payment/checkout-info API — single call for the payment page */
 export interface CheckoutInfoResponse {
   methods: Record<string, MethodLimit>
@@ -68,6 +73,8 @@ export interface CheckoutInfoResponse {
   plans: SubscriptionPlan[]
   balance_disabled: boolean
   balance_recharge_multiplier: number
+  /** Extra balance credit for exact recharge amounts; absent means no bonus. */
+  recharge_bonus_tiers?: RechargeBonusTier[]
   /** Subscription CNY conversion rate (1 USD = X CNY); 0 = disabled, plan price is charged as-is */
   subscription_usd_to_cny_rate: number
   recharge_fee_rate: number

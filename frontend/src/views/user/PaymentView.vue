@@ -53,6 +53,7 @@
               <AmountInput
                 v-model="amount"
                 :amounts="[9.9, 1, 5, 10, 20, 50, 100, 200, 500]"
+                :bonus-tiers="checkout.recharge_bonus_tiers"
                 :min="globalMinAmount"
                 :max="globalMaxAmount"
               />
@@ -79,7 +80,17 @@
                   <span class="font-medium text-gray-700 dark:text-gray-300">{{ t('payment.actualPay') }}</span>
                   <span class="text-lg font-bold text-primary-600 dark:text-primary-400">{{ formatSelectedPaymentAmount(totalAmount) }}</span>
                 </div>
-                <div v-if="balanceRechargeMultiplier !== 1" class="flex justify-between" :class="{ 'border-t border-gray-200 pt-2 dark:border-dark-600': feeRate <= 0 }">
+                <template v-if="rechargeCredit.bonusPercent > 0">
+                  <div class="flex justify-between" :class="{ 'border-t border-gray-200 pt-2 dark:border-dark-600': feeRate <= 0 }">
+                    <span class="text-gray-500 dark:text-gray-400">{{ t('payment.baseCredit') }}</span>
+                    <span class="text-gray-900 dark:text-white">${{ rechargeCredit.base.toFixed(2) }}</span>
+                  </div>
+                  <div class="flex justify-between gap-3 text-green-600 dark:text-green-400">
+                    <span>{{ t('payment.extraBonus', { percent: rechargeCredit.bonusPercent }) }}</span>
+                    <span class="shrink-0">+${{ rechargeCredit.bonus.toFixed(2) }}</span>
+                  </div>
+                </template>
+                <div v-if="balanceRechargeMultiplier !== 1 || rechargeCredit.bonusPercent > 0" class="flex justify-between" :class="{ 'border-t border-gray-200 pt-2 dark:border-dark-600': feeRate <= 0 && rechargeCredit.bonusPercent <= 0 }">
                   <span class="text-gray-500 dark:text-gray-400">{{ t('payment.creditedBalance') }}</span>
                   <span class="text-gray-900 dark:text-white">${{ creditedAmount.toFixed(2) }}</span>
                 </div>
@@ -278,6 +289,7 @@ import { hasPeakRate, formatPeakRateWindow, serverTimezoneLabel, type PeakRateFi
 import type { SubscriptionPlan, CheckoutInfoResponse, CreateOrderResult, OrderType } from '@/types/payment'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AmountInput from '@/components/payment/AmountInput.vue'
+import { calculateRechargeCredit } from '@/components/payment/rechargeBonus'
 import PaymentMethodSelector from '@/components/payment/PaymentMethodSelector.vue'
 import { METHOD_ORDER, getPaymentPopupFeatures, isBuiltInAlipayMethod, isBuiltInWxpayMethod } from '@/components/payment/providerConfig'
 import {
@@ -549,7 +561,8 @@ const subscriptionUsdToCnyRate = computed(() => {
   const rate = checkout.value.subscription_usd_to_cny_rate
   return Number.isFinite(rate) && rate > 0 ? rate : 0
 })
-const creditedAmount = computed(() => Math.round((validAmount.value * balanceRechargeMultiplier.value) * 100) / 100)
+const rechargeCredit = computed(() => calculateRechargeCredit(validAmount.value, balanceRechargeMultiplier.value, checkout.value.recharge_bonus_tiers))
+const creditedAmount = computed(() => rechargeCredit.value.total)
 
 // Adaptive grid: center single card, 2-col for 2 plans, 3-col for 3+
 const planGridClass = computed(() => {

@@ -53,14 +53,7 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	if s.notificationEmailService != nil {
 		s.notificationEmailService.RememberRecipientLocale(ctx, req.UserID, user.Email, req.Locale)
 	}
-	orderAmount := req.Amount
-	limitAmount := req.Amount
-	if plan != nil {
-		orderAmount = plan.Price
-		limitAmount = plan.Price
-	} else if req.OrderType == payment.OrderTypeBalance {
-		orderAmount = calculateCreditedBalance(req.Amount, cfg.BalanceRechargeMultiplier)
-	}
+	orderAmount, limitAmount := calculateCreateOrderAmounts(req, plan, cfg)
 	feeRate := cfg.RechargeFeeRate
 	methodCurrency := payment.DefaultPaymentCurrency
 	if s.configService != nil {
@@ -112,6 +105,19 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 		return nil, err
 	}
 	return resp, nil
+}
+
+// calculateCreateOrderAmounts freezes credited balance when an order is created.
+// Payment fees and limits continue to use the original recharge amount, while
+// subscription prices never receive balance recharge offers.
+func calculateCreateOrderAmounts(req CreateOrderRequest, plan *dbent.SubscriptionPlan, cfg *PaymentConfig) (orderAmount, limitAmount float64) {
+	if plan != nil {
+		return plan.Price, plan.Price
+	}
+	if req.OrderType == payment.OrderTypeBalance {
+		return calculateCreditedBalance(req.Amount, cfg.BalanceRechargeMultiplier), req.Amount
+	}
+	return req.Amount, req.Amount
 }
 
 func (s *PaymentService) validateOrderInput(ctx context.Context, req CreateOrderRequest, cfg *PaymentConfig) (*dbent.SubscriptionPlan, error) {
