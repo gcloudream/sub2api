@@ -18,12 +18,12 @@
           ]"
           @click="selectAmount(preset.amount, preset.blindBox)"
         >
-          <span class="inline-flex max-w-full flex-wrap items-baseline justify-center gap-x-1.5">
+          <span
+            class="inline-flex max-w-full flex-wrap items-baseline justify-center gap-x-1.5"
+            :class="preset.blindBox ? 'text-[#8B6914] dark:text-[#C5A35A]' : undefined"
+          >
             <span>{{ preset.amount }}</span>
-            <template v-if="preset.blindBox && blindBox">
-              <span class="text-xs leading-3">{{ t('payment.blindBox.name') }}</span>
-              <span class="text-xs font-normal leading-3">{{ blindBox.min }}–{{ blindBox.max }}</span>
-            </template>
+            <span v-if="preset.blindBox && blindBox" class="text-xs leading-3">{{ t('payment.blindBox.name') }}</span>
             <span
               v-if="!preset.blindBox && bonusPercent(preset.amount) > 0"
               class="text-xs font-medium text-green-600 dark:text-green-400"

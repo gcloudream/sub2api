@@ -81,7 +81,7 @@ describe('AmountInput explicit mystery box selection', () => {
     const buttons = wrapper.findAll('button')
     expect(buttons).toHaveLength(9)
     expect(buttons[0].text()).toContain('payment.blindBox.name')
-    expect(buttons[0].text()).toContain('50–100')
+    expect(buttons[0].text()).not.toContain('50–100')
     expect(buttons[1].text()).toBe('1')
     expect(buttons[4].text()).toContain('额外赠送5%')
     expect(wrapper.text()).toContain('¥')
