@@ -131,7 +131,7 @@
             </article>
           </div>
         </section>
-        <section class="lux-models"><div><p class="lux-eyebrow mb-3">CONNECTED MODELS</p><h2 class="text-sm">{{ t('home.providers.title') }}</h2></div><div class="lux-model-list"><span>Claude</span><span>GPT</span><span>Gemini</span><span>Antigravity</span></div></section>
+        <section class="lux-models"><div><p class="lux-eyebrow mb-3">CONNECTED MODELS</p><h2 class="text-sm">{{ t('home.providers.title') }}</h2></div><div class="lux-model-list"><span>Claude</span><span>GPT</span></div></section>
       </main>
       <footer class="lux-footer"><p>© {{ currentYear }} {{ siteName }} · AI API Gateway</p><div class="flex items-center gap-5"><a v-if="docUrl" :href="docUrl" target="_blank" rel="noopener noreferrer">{{ t('home.docs') }}</a><a :href="githubUrl" target="_blank" rel="noopener noreferrer">Powered by Sub2API · LGPL-3.0</a></div></footer>
     </div>
