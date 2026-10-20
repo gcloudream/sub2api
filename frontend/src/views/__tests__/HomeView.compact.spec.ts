@@ -56,7 +56,11 @@ function mountHome(settings: Record<string, unknown> = {}) {
 }
 
 function compactDestination(wrapper: ReturnType<typeof mountHome>) {
-  return wrapper.get('[data-testid="compact-home"]').findComponent(RouterLinkStub).props('to')
+  return wrapper
+    .get('[data-testid="compact-home"]')
+    .findAllComponents(RouterLinkStub)
+    .find((link) => ['/login', '/dashboard', '/admin/dashboard'].includes(link.props('to')))
+    ?.props('to')
 }
 
 function modelPlazaDestination(wrapper: ReturnType<typeof mountHome>) {
@@ -109,6 +113,28 @@ describe('HomeView compact mode', () => {
 
     expect(wrapper.find('[data-testid="compact-home"]').exists()).toBe(false)
     expect(wrapper.find('.brand-portal').exists()).toBe(true)
+  })
+
+  it.each([true, false])('offers the internal guide without an external doc URL (compact: %s)', (compact) => {
+    const wrapper = mountHome({ compact_home_enabled: compact, doc_url: '' })
+    const headerGuide = wrapper.get('header').findAllComponents(RouterLinkStub)
+      .find((link) => link.props('to') === '/docs')
+    const footerGuide = wrapper.get('footer').findAllComponents(RouterLinkStub)
+      .find((link) => link.props('to') === '/docs')
+
+    expect(headerGuide?.text()).toContain('nav.usageDocs')
+    expect(headerGuide?.attributes('class')).not.toMatch(/(?:lux-nav-extra|\bhidden\b)/)
+    expect(footerGuide?.text()).toContain('nav.usageDocs')
+  })
+
+  it.each([true, false])('keeps external documentation separate from the internal guide (compact: %s)', (compact) => {
+    const wrapper = mountHome({ compact_home_enabled: compact, doc_url: 'https://example.com/docs' })
+    const externalDocs = wrapper.get('header').get('a[href="https://example.com/docs"]')
+
+    expect(externalDocs.text()).toContain('home.docs')
+    expect(externalDocs.attributes('target')).toBe('_blank')
+    expect(wrapper.get('header').findAllComponents(RouterLinkStub)
+      .some((link) => link.props('to') === '/docs')).toBe(true)
   })
 
   it('links unauthenticated visitors to login', () => {

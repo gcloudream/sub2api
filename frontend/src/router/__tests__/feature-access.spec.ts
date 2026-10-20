@@ -8,6 +8,7 @@ type NavigationGuard = (
 
 const routerHarness = vi.hoisted(() => ({
   guard: null as NavigationGuard | null,
+  routes: [] as { path: string; name?: unknown; meta?: Record<string, unknown> }[],
 }))
 
 const authStore = vi.hoisted(() => ({
@@ -33,13 +34,16 @@ const appStore = vi.hoisted(() => ({
 
 vi.mock('vue-router', () => ({
   createWebHistory: vi.fn(() => ({})),
-  createRouter: vi.fn(() => ({
-    beforeEach: vi.fn((guard: NavigationGuard) => {
-      routerHarness.guard = guard
-    }),
-    afterEach: vi.fn(),
-    onError: vi.fn(),
-  })),
+  createRouter: vi.fn((options: { routes: typeof routerHarness.routes }) => {
+    routerHarness.routes = options.routes
+    return {
+      beforeEach: vi.fn((guard: NavigationGuard) => {
+        routerHarness.guard = guard
+      }),
+      afterEach: vi.fn(),
+      onError: vi.fn(),
+    }
+  }),
 }))
 
 vi.mock('@/stores/auth', () => ({
@@ -115,9 +119,54 @@ describe('feature route guard', () => {
     authStore.isAuthenticated = true
     authStore.isAdmin = false
     authStore.isSimpleMode = false
+    appStore.backendModeEnabled = false
     appStore.publicSettingsLoaded = false
     appStore.cachedPublicSettings = null
     appStore.fetchPublicSettings.mockReset()
+  })
+
+  it('registers the internal guide as a public route with a translated title', () => {
+    const guide = routerHarness.routes.find((route) => route.name === 'UsageDocs')
+
+    expect(guide?.path).toBe('/docs')
+    expect(guide?.meta).toEqual({
+      requiresAuth: false,
+      title: 'Usage Guide',
+      titleKey: 'nav.usageDocs',
+    })
+  })
+
+  it.each([
+    ['anonymous', false, false, false],
+    ['user', true, false, false],
+    ['administrator', true, true, false],
+    ['anonymous in backend mode', false, false, true],
+    ['user in backend mode', true, false, true],
+  ])('allows %s to read the guide without payment, group, or simple-mode access', async (_label, authenticated, admin, backend) => {
+    authStore.isAuthenticated = authenticated
+    authStore.isAdmin = admin
+    authStore.isSimpleMode = true
+    appStore.backendModeEnabled = backend
+    appStore.publicSettingsLoaded = true
+    appStore.cachedPublicSettings = { payment_enabled: false, subscription_enabled: false }
+    const guide = routerHarness.routes.find((route) => route.name === 'UsageDocs')
+
+    const { navigation, next } = runGuard(guide?.meta ?? {}, '/docs')
+    await navigation
+
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith()
+    expect(appStore.fetchPublicSettings).not.toHaveBeenCalled()
+  })
+
+  it('does not make other docs paths public in backend mode', async () => {
+    authStore.isAuthenticated = false
+    appStore.backendModeEnabled = true
+
+    const { navigation, next } = runGuard({ requiresAuth: false }, '/docs/unknown')
+    await navigation
+
+    expect(next).toHaveBeenCalledWith('/login')
   })
 
   it('waits for the first public-settings request before deciding payment access', async () => {

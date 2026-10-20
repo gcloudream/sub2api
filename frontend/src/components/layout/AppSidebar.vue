@@ -143,6 +143,19 @@
           </router-link>
         </div>
       </template>
+
+      <div class="sidebar-section">
+        <router-link
+          to="/docs"
+          class="sidebar-link mb-1"
+          :class="{ 'sidebar-link-active': isActive('/docs'), 'sidebar-link-collapsed': sidebarCollapsed }"
+          :title="sidebarCollapsed ? t('nav.usageDocs') : undefined"
+          @click="handleMenuItemClick('/docs')"
+        >
+          <Icon name="book" class="h-5 w-5 flex-shrink-0" />
+          <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ t('nav.usageDocs') }}</span>
+        </router-link>
+      </div>
     </nav>
 
     <!-- Bottom Section -->

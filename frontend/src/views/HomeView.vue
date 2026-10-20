@@ -30,15 +30,23 @@
         </div>
         <div class="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
           <LocaleSwitcher />
+          <router-link
+            to="/docs"
+            class="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-dark-200 dark:hover:bg-dark-800"
+          >
+            <Icon name="book" size="md" />
+            <span>{{ t('nav.usageDocs') }}</span>
+          </router-link>
           <a
             v-if="docUrl"
             :href="docUrl"
             target="_blank"
             rel="noopener noreferrer"
-            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:text-dark-400 dark:hover:bg-dark-800"
+            class="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-sm text-gray-500 hover:bg-gray-100 dark:text-dark-400 dark:hover:bg-dark-800"
             :title="t('home.viewDocs')"
           >
             <Icon name="book" size="md" />
+            <span>{{ t('home.docs') }}</span>
           </a>
           <router-link
             v-if="showModelPlazaEntry"
@@ -86,19 +94,21 @@
     </main>
 
     <footer class="min-w-0 border-t border-gray-200 px-4 py-5 text-center text-sm text-gray-500 [overflow-wrap:anywhere] sm:px-6 dark:border-dark-800 dark:text-dark-400">
-      &copy; {{ currentYear }} {{ siteName }}
+      <p>&copy; {{ currentYear }} {{ siteName }}</p>
+      <router-link to="/docs" class="mt-2 inline-flex min-h-10 items-center hover:text-gray-900 dark:hover:text-white">{{ t('nav.usageDocs') }}</router-link>
     </footer>
   </div>
 
   <!-- Fantasy built-in home; custom and compact modes above remain supported. -->
   <div v-else class="lux-home lux-ambient">
     <div class="lux-wrap">
-      <header class="lux-nav">
+      <header class="lux-nav flex-wrap py-4 sm:flex-nowrap sm:py-0">
         <router-link to="/home" class="lux-brand">
           <img :src="siteLogo || '/logo.svg'" :alt="siteName" />
           <span><span class="lux-brand-name">{{ siteName }}</span><small>AI API GATEWAY</small></span>
         </router-link>
         <nav class="lux-nav-actions" :aria-label="t('home.dashboard')">
+          <router-link to="/docs" class="btn btn-ghost shrink-0 whitespace-nowrap">{{ t('nav.usageDocs') }}</router-link>
           <a v-if="docUrl" :href="docUrl" target="_blank" rel="noopener noreferrer" class="lux-nav-extra btn btn-ghost">{{ t('home.docs') }}</a>
           <router-link v-if="showModelPlazaEntry" to="/model-plaza" class="lux-nav-extra btn btn-ghost">{{ t('nav.modelPlaza') }}</router-link>
           <LocaleSwitcher />
@@ -133,7 +143,7 @@
         </section>
         <section class="lux-models"><div><p class="lux-eyebrow mb-3">CONNECTED MODELS</p><h2 class="text-sm">{{ t('home.providers.title') }}</h2></div><div class="lux-model-list"><span>Claude</span><span>GPT</span></div></section>
       </main>
-      <footer class="lux-footer"><p>© {{ currentYear }} {{ siteName }} · AI API Gateway</p><div class="flex items-center gap-5"><a v-if="docUrl" :href="docUrl" target="_blank" rel="noopener noreferrer">{{ t('home.docs') }}</a><a :href="githubUrl" target="_blank" rel="noopener noreferrer">Powered by Sub2API · LGPL-3.0</a></div></footer>
+      <footer class="lux-footer"><p>© {{ currentYear }} {{ siteName }} · AI API Gateway</p><div class="flex flex-wrap items-center gap-5"><router-link to="/docs">{{ t('nav.usageDocs') }}</router-link><a v-if="docUrl" :href="docUrl" target="_blank" rel="noopener noreferrer">{{ t('home.docs') }}</a><a :href="githubUrl" target="_blank" rel="noopener noreferrer">Powered by Sub2API · LGPL-3.0</a></div></footer>
     </div>
   </div>
 </template>

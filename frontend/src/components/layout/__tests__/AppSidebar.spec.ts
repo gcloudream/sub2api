@@ -2,12 +2,119 @@ import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { describe, expect, it } from 'vitest'
+import { mount, RouterLinkStub } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import AppSidebar from '../AppSidebar.vue'
+
+const { authStore, appStore, adminSettingsStore } = vi.hoisted(() => ({
+  authStore: { isAdmin: false, isSimpleMode: false },
+  appStore: {
+    siteName: 'Test site',
+    siteLogo: '',
+    sidebarCollapsed: false,
+    mobileOpen: false,
+    publicSettingsLoaded: true,
+    sidebarScrollTop: 0,
+    backendModeEnabled: false,
+    cachedPublicSettings: {
+      payment_enabled: false,
+      subscription_enabled: false,
+      custom_menu_items: [],
+    },
+    setMobileOpen: vi.fn(),
+    toggleSidebar: vi.fn(),
+  },
+  adminSettingsStore: {
+    customMenuItems: [],
+    opsMonitoringEnabled: false,
+    paymentEnabled: false,
+    fetch: vi.fn(),
+  },
+}))
+
+vi.mock('@/stores', () => ({
+  useAuthStore: () => authStore,
+  useAppStore: () => appStore,
+  useAdminSettingsStore: () => adminSettingsStore,
+  useOnboardingStore: () => ({ isCurrentStep: vi.fn(() => false), nextStep: vi.fn() }),
+}))
+
+vi.mock('@/stores/app', () => ({ useAppStore: () => appStore }))
+
+vi.mock('@/composables/useBatchImageAccess', () => ({
+  useBatchImageAccess: () => ({ canUseBatchImage: { value: false }, refreshBatchImageAccess: vi.fn() }),
+}))
+
+vi.mock('vue-router', async (importOriginal) => ({
+  ...await importOriginal<typeof import('vue-router')>(),
+  useRoute: () => ({ path: '/keys' }),
+  useRouter: () => ({ push: vi.fn() }),
+}))
+
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...await importOriginal<typeof import('vue-i18n')>(),
+  useI18n: () => ({ t: (key: string) => key }),
+}))
 
 const componentPath = resolve(dirname(fileURLToPath(import.meta.url)), '../AppSidebar.vue')
 const componentSource = readFileSync(componentPath, 'utf8')
 const stylePath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../style.css')
 const styleSource = readFileSync(stylePath, 'utf8')
+
+describe('AppSidebar usage guide navigation', () => {
+  beforeEach(() => {
+    authStore.isAdmin = false
+    authStore.isSimpleMode = false
+    appStore.sidebarCollapsed = false
+    appStore.mobileOpen = false
+    appStore.backendModeEnabled = false
+    appStore.setMobileOpen.mockClear()
+  })
+
+  it.each([
+    ['regular user', false, false, false],
+    ['administrator', true, false, false],
+    ['simple-mode user', false, true, false],
+    ['simple-mode administrator', true, true, false],
+    ['backend-mode user', false, false, true],
+  ])('shows one guide entry for %s even with payment and subscriptions disabled', (_label, admin, simple, backend) => {
+    authStore.isAdmin = admin
+    authStore.isSimpleMode = simple
+    appStore.backendModeEnabled = backend
+    const wrapper = mount(AppSidebar, {
+      global: { stubs: { RouterLink: RouterLinkStub, Icon: true } },
+    })
+    const guides = wrapper.findAllComponents(RouterLinkStub)
+      .filter((link) => link.props('to') === '/docs')
+
+    expect(guides).toHaveLength(1)
+    expect(guides[0].text()).toBe('nav.usageDocs')
+    expect(guides[0].get('icon-stub').attributes('name')).toBe('book')
+    wrapper.unmount()
+  })
+
+  it('keeps the collapsed guide accessible by its title and closes the mobile drawer after navigation', async () => {
+    vi.useFakeTimers()
+    try {
+      appStore.sidebarCollapsed = true
+      appStore.mobileOpen = true
+      const wrapper = mount(AppSidebar, {
+        global: { stubs: { RouterLink: RouterLinkStub, Icon: true } },
+      })
+      const guide = wrapper.findAllComponents(RouterLinkStub)
+        .find((link) => link.props('to') === '/docs')!
+
+      expect(guide.attributes('title')).toBe('nav.usageDocs')
+      await guide.trigger('click')
+      await vi.advanceTimersByTimeAsync(150)
+      expect(appStore.setMobileOpen).toHaveBeenCalledWith(false)
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
 
 describe('AppSidebar custom SVG styles', () => {
   it('does not override uploaded SVG fill or stroke colors', () => {
