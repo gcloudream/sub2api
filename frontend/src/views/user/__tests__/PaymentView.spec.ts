@@ -928,3 +928,74 @@ describe('PaymentView subscription feature flag', () => {
     wrapper.unmount()
   })
 })
+
+describe('PaymentView mystery box checkout', () => {
+  const box = { enabled: true, price: 9.9, currency: 'CNY', min: 50, max: 100, daily_limit: 1, rules_version: 'test-v1', probabilities: [] }
+  async function mountBox(rechargeFeeRate = 0) {
+    vi.useRealTimers()
+    window.localStorage.clear()
+    routeState.path = '/purchase'
+    routeState.query = {}
+    appStoreState.setPublicSettings({ subscription_enabled: false })
+    createOrder.mockReset().mockResolvedValue({
+      order_id: 88, amount: 0, pay_amount: 9.9, fee_rate: 0, currency: 'CNY',
+      qr_code: 'https://pay.example.test/88', expires_at: '2099-01-01T00:00:00Z', recharge_mode: 'blind_box',
+    })
+    getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture({ balance_recharge_multiplier: 6, blind_box: box, recharge_fee_rate: rechargeFeeRate }))
+    const wrapper = shallowMount(PaymentView, { global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, Teleport: true, Transition: false } } })
+    await flushPromises()
+    return wrapper
+  }
+
+  afterEach(() => appStoreState.setPublicSettings(undefined))
+
+  it('sends an explicit mystery box mode without treating its range as guaranteed fixed credit', async () => {
+    const wrapper = await mountBox()
+    const input = wrapper.getComponent(AmountInput)
+    input.vm.$emit('select-mode', 'blind_box')
+    input.vm.$emit('update:modelValue', 9.9)
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'BlindBoxDetails' }).exists()).toBe(true)
+    expect(wrapper.text()).toContain('$50–$100')
+    expect(wrapper.text()).not.toContain('$59.40')
+    const button = wrapper.findAll('button').find(button => button.text().includes('payment.createOrder'))!
+    await button.trigger('click')
+    await flushPromises()
+    expect(createOrder).toHaveBeenCalledWith(expect.objectContaining({ amount: 9.9, order_type: 'balance', recharge_mode: 'blind_box' }))
+    wrapper.unmount()
+  })
+
+  it('keeps the mystery box payment exactly at its API price when ordinary recharges have a fee', async () => {
+    const wrapper = await mountBox(10)
+    const input = wrapper.getComponent(AmountInput)
+    input.vm.$emit('select-mode', 'blind_box')
+    input.vm.$emit('update:modelValue', 9.9)
+    await flushPromises()
+    const button = wrapper.findAll('button').find(button => button.text().includes('payment.createOrder'))!
+    expect(button.text()).toContain(formatPaymentAmount(9.9, 'CNY'))
+    expect(wrapper.text()).not.toContain(formatPaymentAmount(10.89, 'CNY'))
+    expect(wrapper.text()).not.toContain('payment.fee')
+    await button.trigger('click')
+    await flushPromises()
+    expect(createOrder).toHaveBeenCalledWith(expect.objectContaining({ amount: 9.9, recharge_mode: 'blind_box' }))
+    wrapper.unmount()
+  })
+
+  it('uses fixed ordinary recharge when the custom field selects the same 9.9 price', async () => {
+    const wrapper = await mountBox()
+    const input = wrapper.getComponent(AmountInput)
+    input.vm.$emit('select-mode', 'blind_box')
+    input.vm.$emit('update:modelValue', 9.9)
+    await flushPromises()
+    input.vm.$emit('select-mode', 'balance')
+    input.vm.$emit('update:modelValue', 9.9)
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'BlindBoxDetails' }).exists()).toBe(false)
+    expect(wrapper.text()).toContain('$59.40')
+    const button = wrapper.findAll('button').find(button => button.text().includes('payment.createOrder'))!
+    await button.trigger('click')
+    await flushPromises()
+    expect(createOrder.mock.calls[0][0]).not.toHaveProperty('recharge_mode')
+    wrapper.unmount()
+  })
+})

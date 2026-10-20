@@ -3,6 +3,8 @@ import type {
   CreateOrderResult,
   MethodLimit,
   OrderType,
+  RechargeMode,
+  BlindBoxOrderInfo,
   WechatJSAPIPayload,
   WechatOAuthInfo,
 } from '@/types/payment'
@@ -46,6 +48,8 @@ export interface PaymentRecoverySnapshot {
   paymentEnv: string
   payAmount: number
   orderType: OrderType | ''
+  rechargeMode?: RechargeMode
+  blindBox?: BlindBoxOrderInfo
   paymentMode: string
   resumeToken: string
   alipayMobilePrecreateDeepLink?: boolean
@@ -77,6 +81,7 @@ export interface PaymentLaunchDecision {
 }
 
 export interface BuildCreateOrderPayloadInput {
+  rechargeMode?: RechargeMode
   amount: number
   paymentType: string
   orderType: OrderType
@@ -136,6 +141,9 @@ export function buildCreateOrderPayload(input: BuildCreateOrderPayloadInput): Cr
       : 'hosted_redirect',
   }
 
+  if (input.rechargeMode === 'blind_box' && input.orderType === 'balance') {
+    payload.recharge_mode = 'blind_box'
+  }
   if (input.planId) {
     payload.plan_id = input.planId
   }
@@ -166,6 +174,8 @@ export function decidePaymentLaunch(
     paymentEnv: result.payment_env || '',
     payAmount: result.pay_amount,
     orderType: context.orderType,
+    rechargeMode: result.recharge_mode,
+    blindBox: result.blind_box,
     paymentMode: (result.payment_mode || '').trim(),
     resumeToken: result.resume_token || '',
     alipayMobilePrecreateDeepLink: result.alipay_mobile_precreate_deep_link === true,
@@ -325,6 +335,8 @@ export function readPaymentRecoverySnapshot(
       paymentEnv: parsed.paymentEnv || '',
       payAmount: parsed.payAmount,
       orderType: parsed.orderType === 'subscription' ? 'subscription' : 'balance',
+      rechargeMode: parsed.rechargeMode === 'blind_box' ? 'blind_box' : 'balance',
+      blindBox: parsed.blindBox,
       paymentMode: parsed.paymentMode,
       resumeToken: parsed.resumeToken,
       alipayMobilePrecreateDeepLink: parsed.alipayMobilePrecreateDeepLink === true,

@@ -719,6 +719,8 @@ export default {
         moveDown: '下移',
       },
       payment: {
+        blindBoxEnabled: '启用 9.9 元额度盲盒',
+        blindBoxEnabledHint: '关闭后停止创建新的盲盒订单，已支付订单仍会正常开奖并入账。普通充值不受此开关影响。',
         title: '支付设置',
         description: '配置支付系统选项',
         configGuide: '支付配置指南',

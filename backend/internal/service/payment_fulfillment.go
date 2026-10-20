@@ -179,17 +179,27 @@ func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, trad
 	previousStatus := o.Status
 	now := time.Now()
 	grace := now.Add(-paymentGraceMinutes * time.Minute)
-	c, err := s.entClient.PaymentOrder.Update().Where(
-		paymentorder.IDEQ(o.ID),
-		paymentorder.Or(
-			paymentorder.StatusEQ(OrderStatusPending),
-			paymentorder.StatusEQ(OrderStatusCancelled),
-			paymentorder.And(
-				paymentorder.StatusEQ(OrderStatusExpired),
-				paymentorder.UpdatedAtGTE(grace),
+	var c int
+	var err error
+	if blindBoxMetadata(o) != nil {
+		var changed bool
+		changed, err = s.markBlindBoxPaid(ctx, o, tradeNo, paid, now)
+		if changed {
+			c = 1
+		}
+	} else {
+		c, err = s.entClient.PaymentOrder.Update().Where(
+			paymentorder.IDEQ(o.ID),
+			paymentorder.Or(
+				paymentorder.StatusEQ(OrderStatusPending),
+				paymentorder.StatusEQ(OrderStatusCancelled),
+				paymentorder.And(
+					paymentorder.StatusEQ(OrderStatusExpired),
+					paymentorder.UpdatedAtGTE(grace),
+				),
 			),
-		),
-	).SetStatus(OrderStatusPaid).SetPayAmount(paid).SetPaymentTradeNo(tradeNo).SetPaidAt(now).ClearFailedAt().ClearFailedReason().Save(ctx)
+		).SetStatus(OrderStatusPaid).SetPayAmount(paid).SetPaymentTradeNo(tradeNo).SetPaidAt(now).ClearFailedAt().ClearFailedReason().Save(ctx)
+	}
 	if err != nil {
 		return fmt.Errorf("update to PAID: %w", err)
 	}
@@ -259,6 +269,11 @@ func (s *PaymentService) ExecuteBalanceFulfillment(ctx context.Context, oid int6
 	}
 	if o.Status == OrderStatusCompleted {
 		return nil
+	}
+	if blindBoxMetadata(o) != nil {
+		if _, ok := validBlindBoxDraw(o); !ok {
+			return fmt.Errorf("paid blind box is missing a committed draw")
+		}
 	}
 	if psIsRefundStatus(o.Status) {
 		return infraerrors.BadRequest("INVALID_STATUS", "refund-related order cannot fulfill")
@@ -767,6 +782,13 @@ func (s *PaymentService) applyAffiliateRebateForOrder(ctx context.Context, o *db
 func affiliateRebateBaseAmount(o *dbent.PaymentOrder) float64 {
 	if o == nil {
 		return 0
+	}
+	if m := blindBoxMetadata(o); m != nil {
+		v, _ := m["standard_amount"].(float64)
+		if math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 {
+			return 0
+		}
+		return v
 	}
 	switch o.OrderType {
 	case payment.OrderTypeBalance, payment.OrderTypeSubscription:

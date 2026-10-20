@@ -1,5 +1,9 @@
 <template>
   <div class="space-y-4">
+    <div v-if="rechargeMode === 'blind_box' && !outcome" class="rounded-xl bg-green-50 p-4 text-sm text-gray-700 dark:bg-green-950/20 dark:text-gray-200">
+      <span class="font-semibold">{{ t('payment.blindBox.name') }}</span>
+      <p class="mt-1 text-xs">{{ t('payment.blindBox.pendingHint') }}</p>
+    </div>
     <!-- ═══ Terminal States: show result, user clicks to return ═══ -->
 
     <!-- Success -->
@@ -20,7 +24,7 @@
                 <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.orderNo') }}</span>
                 <span class="font-medium text-gray-900 dark:text-white">{{ paidOrder.out_trade_no }}</span>
               </div>
-              <div class="flex justify-between">
+              <div v-if="!isBlindBoxOrder(paidOrder)" class="flex justify-between">
                 <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.amount') }}</span>
                 <span class="font-medium text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ paidOrder.amount.toFixed(2) }}</span>
               </div>
@@ -30,6 +34,7 @@
               </div>
             </div>
           </div>
+          <BlindBoxOrderResult v-if="paidOrder && isBlindBoxOrder(paidOrder)" class="w-full" :order="paidOrder" />
           <button class="btn btn-primary" @click="handleDone">{{ t('common.confirm') }}</button>
         </div>
       </div>
@@ -70,6 +75,13 @@
     <!-- ═══ Active States: QR or Popup waiting ═══ -->
 
     <!-- Mobile Alipay app handoff. The QR fallback stays hidden until launch timeout. -->
+    <template v-else-if="awaitingFulfillment">
+      <div class="card p-6 text-center">
+        <div class="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-primary-500 border-t-transparent"></div>
+        <p class="mt-4 text-sm text-gray-700 dark:text-gray-200">{{ t('payment.result.processing') }}</p>
+        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ t('payment.blindBox.awaitingResult') }}</p>
+      </div>
+    </template>
     <template v-else-if="isMobileAlipayDeepLink">
       <template v-if="!deepLinkFallbackVisible">
         <div class="card p-6">
@@ -226,7 +238,9 @@ import { paymentAPI } from '@/api/payment'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import { getPaymentPopupFeatures, isBuiltInAlipayMethod, isBuiltInWxpayMethod } from '@/components/payment/providerConfig'
 import { currencySymbol, formatPaymentAmount, normalizePaymentCurrency } from '@/components/payment/currency'
-import type { PaymentOrder } from '@/types/payment'
+import BlindBoxOrderResult from './BlindBoxOrderResult.vue'
+import { isBlindBoxAwaitingFulfillment, isBlindBoxOrder } from './blindBox'
+import type { RechargeMode, PaymentOrder } from '@/types/payment'
 import Icon from '@/components/icons/Icon.vue'
 import QRCode from 'qrcode'
 import alipayIcon from '@/assets/icons/alipay.svg'
@@ -240,6 +254,7 @@ import {
 
 const props = defineProps<{
   orderId: number
+  rechargeMode?: RechargeMode
   amount?: number
   payAmount?: number
   qrCode: string
@@ -266,6 +281,7 @@ const qrUrl = ref('')
 const remainingSeconds = ref(0)
 const cancelling = ref(false)
 const paidOrder = ref<PaymentOrder | null>(null)
+const awaitingFulfillment = ref(false)
 const deepLinkState = ref<AlipayDeepLinkState>('idle')
 const deepLinkFallbackVisible = ref(false)
 const paymentCurrency = computed(() => normalizePaymentCurrency(props.currency))
@@ -426,6 +442,11 @@ async function pollStatus() {
     if (outcome.value) return
     order = await tryRecoverPendingOrder(order)
     if (outcome.value) return
+    if (isBlindBoxAwaitingFulfillment(order)) {
+      awaitingFulfillment.value = true
+      if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null }
+      return
+    }
     if (isSuccessStatus(order.status)) {
       cleanup()
       paidOrder.value = order

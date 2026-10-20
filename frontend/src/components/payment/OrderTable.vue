@@ -18,7 +18,12 @@
         <span v-if="row.fee_rate > 0" class="ml-1 text-xs text-gray-400" :title="t('payment.orders.fee') + ': ' + row.fee_rate + '%'">
           ({{ t('payment.orders.fee') }} {{ row.fee_rate }}%)
         </span>
-        <div v-if="row.amount !== row.pay_amount" class="text-xs text-gray-500">
+        <div v-if="isBlindBoxOrder(row)" class="mt-1 text-xs text-green-700 dark:text-green-400">
+          <span>{{ t('payment.blindBox.name') }}</span>
+          <span v-if="completedBlindBoxAmount(row) !== null"> · {{ t('payment.blindBox.drawResult') }} ${{ completedBlindBoxAmount(row) }}</span>
+          <span v-else> · {{ t('payment.blindBox.notRevealed') }}</span>
+        </div>
+        <div v-if="!isBlindBoxOrder(row) && row.amount !== row.pay_amount" class="text-xs text-gray-500">
           {{ t('payment.orders.creditedAmount') }}: {{ creditedAmountSymbol }}{{ row.amount.toFixed(2) }}
         </div>
       </div>
@@ -45,6 +50,7 @@ import type { PaymentOrder } from '@/types/payment'
 import type { Column } from '@/components/common/types'
 import DataTable from '@/components/common/DataTable.vue'
 import OrderStatusBadge from '@/components/payment/OrderStatusBadge.vue'
+import { isBlindBoxOrder, completedBlindBoxAmount } from './blindBox'
 import { currencySymbol } from '@/components/payment/currency'
 
 const { t } = useI18n()

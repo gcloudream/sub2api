@@ -309,6 +309,7 @@ type UpdateSettingsRequest struct {
 	PaymentMaxPendingOrders          *int     `json:"payment_max_pending_orders"`
 	PaymentEnabledTypes              []string `json:"payment_enabled_types"`
 	PaymentBalanceDisabled           *bool    `json:"payment_balance_disabled"`
+	PaymentBlindBoxEnabled           *bool    `json:"payment_blind_box_enabled"`
 	PaymentBalanceRechargeMultiplier *float64 `json:"payment_balance_recharge_multiplier"`
 	PaymentSubscriptionUSDToCNYRate  *float64 `json:"payment_subscription_usd_to_cny_rate"`
 	PaymentRechargeFeeRate           *float64 `json:"payment_recharge_fee_rate"`
@@ -2112,6 +2113,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			EnabledTypes:                  req.PaymentEnabledTypes,
 			BalanceDisabled:               req.PaymentBalanceDisabled,
 			BalanceRechargeMultiplier:     req.PaymentBalanceRechargeMultiplier,
+			BlindBoxEnabled:               req.PaymentBlindBoxEnabled,
 			SubscriptionUSDToCNYRate:      req.PaymentSubscriptionUSDToCNYRate,
 			RechargeFeeRate:               req.PaymentRechargeFeeRate,
 			LoadBalanceStrategy:           req.PaymentLoadBalanceStrat,
@@ -2391,6 +2393,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PaymentEnabledTypes:                                    updatedPaymentCfg.EnabledTypes,
 		PaymentBalanceDisabled:                                 updatedPaymentCfg.BalanceDisabled,
 		PaymentBalanceRechargeMultiplier:                       updatedPaymentCfg.BalanceRechargeMultiplier,
+		PaymentBlindBoxEnabled:                                 updatedPaymentCfg.BlindBoxEnabled,
 		PaymentSubscriptionUSDToCNYRate:                        updatedPaymentCfg.SubscriptionUSDToCNYRate,
 		PaymentRechargeFeeRate:                                 updatedPaymentCfg.RechargeFeeRate,
 		PaymentLoadBalanceStrat:                                updatedPaymentCfg.LoadBalanceStrategy,
@@ -2462,7 +2465,7 @@ func mapDingTalkValidateError(err error) string {
 }
 
 func hasPaymentFields(req UpdateSettingsRequest) bool {
-	return req.PaymentEnabled != nil || req.PaymentMinAmount != nil ||
+	return req.PaymentEnabled != nil || req.PaymentBlindBoxEnabled != nil || req.PaymentMinAmount != nil ||
 		req.PaymentMaxAmount != nil || req.PaymentDailyLimit != nil ||
 		req.PaymentOrderTimeoutMin != nil || req.PaymentMaxPendingOrders != nil ||
 		req.PaymentEnabledTypes != nil || req.PaymentBalanceDisabled != nil ||

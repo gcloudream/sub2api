@@ -22,6 +22,33 @@ export type OrderStatus =
 export type PaymentType = 'alipay' | 'wxpay' | 'alipay_direct' | 'wxpay_direct' | 'stripe' | 'easypay' | 'airwallex'
 
 export type OrderType = 'balance' | 'subscription'
+export type RechargeMode = 'balance' | 'blind_box'
+
+export interface BlindBoxProbability {
+  min: number
+  max: number
+  probability: number
+  per_integer_probability: number
+}
+
+export interface BlindBoxConfig {
+  enabled: boolean
+  price: number
+  currency: string
+  min: number
+  max: number
+  daily_limit: number
+  rules_version: string
+  probabilities: BlindBoxProbability[]
+}
+
+export interface BlindBoxOrderInfo {
+  rules_version: string
+  min: number
+  max: number
+  drawn: boolean
+  amount?: number
+}
 
 // ==================== Configuration ====================
 
@@ -75,6 +102,7 @@ export interface CheckoutInfoResponse {
   balance_recharge_multiplier: number
   /** Extra balance credit for exact recharge amounts; absent means no bonus. */
   recharge_bonus_tiers?: RechargeBonusTier[]
+  blind_box?: BlindBoxConfig
   /** Subscription CNY conversion rate (1 USD = X CNY); 0 = disabled, plan price is charged as-is */
   subscription_usd_to_cny_rate: number
   recharge_fee_rate: number
@@ -100,6 +128,8 @@ export interface PaymentOrder {
   out_trade_no: string
   status: OrderStatus
   order_type: OrderType
+  recharge_mode?: RechargeMode
+  blind_box?: BlindBoxOrderInfo
   created_at: string
   expires_at: string
   paid_at?: string
@@ -177,6 +207,7 @@ export interface CreateOrderRequest {
   amount: number
   payment_type: string
   order_type: string
+  recharge_mode?: RechargeMode
   plan_id?: number
   return_url?: string
   payment_source?: string
@@ -206,6 +237,8 @@ export interface WechatJSAPIPayload {
 }
 
 export interface CreateOrderResult {
+  recharge_mode?: RechargeMode
+  blind_box?: BlindBoxOrderInfo
   order_id: number
   amount: number
   pay_url?: string

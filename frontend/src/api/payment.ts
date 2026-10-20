@@ -11,11 +11,16 @@ import type {
   CheckoutInfoResponse,
   CreateOrderRequest,
   CreateOrderResult,
-  PaymentOrder
+  PaymentOrder,
+  RechargeMode,
+  BlindBoxOrderInfo
 } from '@/types/payment'
 import type { BasePaginationResponse } from '@/types'
 
 export interface PublicOrderVerifyResult {
+  paid_at?: string | null
+  recharge_mode?: RechargeMode
+  blind_box?: BlindBoxOrderInfo
   out_trade_no: string
   status: string
   paid: boolean

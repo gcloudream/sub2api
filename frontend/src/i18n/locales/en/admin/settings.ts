@@ -724,6 +724,8 @@ export default {
         moveDown: 'Move Down',
       },
       payment: {
+        blindBoxEnabled: 'Enable the CNY 9.9 credit mystery box',
+        blindBoxEnabledHint: 'Disabling stops new mystery box orders. Paid orders still draw and receive credits. Standard recharges are unaffected.',
         title: 'Payment Settings',
         description: 'Configure payment system options',
         configGuide: 'Configuration Guide',

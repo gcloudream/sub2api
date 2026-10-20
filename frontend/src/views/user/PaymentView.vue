@@ -26,6 +26,7 @@
             :currency="paymentState.currency || selectedCurrency"
             :out-trade-no="paymentState.outTradeNo"
             :mobile-alipay-deep-link="paymentState.alipayMobilePrecreateDeepLink"
+            :recharge-mode="paymentState.rechargeMode"
             @done="onPaymentDone"
             @success="onPaymentSuccess"
             @settled="onPaymentSettled"
@@ -54,9 +55,14 @@
                 v-model="amount"
                 :amounts="[9.9, 1, 5, 10, 20, 50, 100, 200, 500]"
                 :bonus-tiers="checkout.recharge_bonus_tiers"
+                :blind-box="checkout.blind_box"
+                :recharge-mode="rechargeMode"
+                :currency="selectedCurrency"
+                @select-mode="rechargeMode = $event"
                 :min="globalMinAmount"
                 :max="globalMaxAmount"
               />
+              <BlindBoxDetails v-if="isBlindBox && checkout.blind_box" :config="checkout.blind_box" :standard-amount="standardBlindBoxCredit" />
               <p v-if="amountError" class="mt-2 text-xs text-amber-600 dark:text-amber-300">{{ amountError }}</p>
             </div>
             <div v-if="enabledMethods.length >= 1" class="card p-6">
@@ -80,7 +86,7 @@
                   <span class="font-medium text-gray-700 dark:text-gray-300">{{ t('payment.actualPay') }}</span>
                   <span class="text-lg font-bold text-primary-600 dark:text-primary-400">{{ formatSelectedPaymentAmount(totalAmount) }}</span>
                 </div>
-                <template v-if="rechargeCredit.bonusPercent > 0">
+                <template v-if="!isBlindBox && rechargeCredit.bonusPercent > 0">
                   <div class="flex justify-between" :class="{ 'border-t border-gray-200 pt-2 dark:border-dark-600': feeRate <= 0 }">
                     <span class="text-gray-500 dark:text-gray-400">{{ t('payment.baseCredit') }}</span>
                     <span class="text-gray-900 dark:text-white">${{ rechargeCredit.base.toFixed(2) }}</span>
@@ -90,11 +96,15 @@
                     <span class="shrink-0">+${{ rechargeCredit.bonus.toFixed(2) }}</span>
                   </div>
                 </template>
-                <div v-if="balanceRechargeMultiplier !== 1 || rechargeCredit.bonusPercent > 0" class="flex justify-between" :class="{ 'border-t border-gray-200 pt-2 dark:border-dark-600': feeRate <= 0 && rechargeCredit.bonusPercent <= 0 }">
+                <div v-if="!isBlindBox && (balanceRechargeMultiplier !== 1 || rechargeCredit.bonusPercent > 0)" class="flex justify-between" :class="{ 'border-t border-gray-200 pt-2 dark:border-dark-600': feeRate <= 0 && rechargeCredit.bonusPercent <= 0 }">
                   <span class="text-gray-500 dark:text-gray-400">{{ t('payment.creditedBalance') }}</span>
                   <span class="text-gray-900 dark:text-white">${{ creditedAmount.toFixed(2) }}</span>
                 </div>
-                <p v-if="balanceRechargeMultiplier !== 1" class="border-t border-gray-200 pt-2 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">
+                <div v-if="isBlindBox && checkout.blind_box" class="flex flex-wrap justify-between gap-2 border-t border-gray-200 pt-2 dark:border-dark-600">
+                  <span class="text-gray-500 dark:text-gray-400">{{ t('payment.blindBox.finalCredit') }}</span>
+                  <span class="font-semibold text-green-700 dark:text-green-400">${{ checkout.blind_box.min }}–${{ checkout.blind_box.max }}</span>
+                </div>
+                <p v-if="!isBlindBox && balanceRechargeMultiplier !== 1" class="border-t border-gray-200 pt-2 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">
                   {{ t('payment.rechargeRatePreview', { currency: selectedCurrency, usd: balanceRechargeMultiplier.toFixed(2) }) }}
                 </p>
               </div>
@@ -286,9 +296,10 @@ import { paymentAPI } from '@/api/payment'
 import { extractApiErrorMessage, extractI18nErrorMessage } from '@/utils/apiError'
 import { isMobileDevice } from '@/utils/device'
 import { hasPeakRate, formatPeakRateWindow, serverTimezoneLabel, type PeakRateFields } from '@/utils/peak-rate'
-import type { SubscriptionPlan, CheckoutInfoResponse, CreateOrderResult, OrderType } from '@/types/payment'
+import type { SubscriptionPlan, CheckoutInfoResponse, CreateOrderResult, OrderType, RechargeMode } from '@/types/payment'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AmountInput from '@/components/payment/AmountInput.vue'
+import BlindBoxDetails from '@/components/payment/BlindBoxDetails.vue'
 import { calculateRechargeCredit } from '@/components/payment/rechargeBonus'
 import PaymentMethodSelector from '@/components/payment/PaymentMethodSelector.vue'
 import { METHOD_ORDER, getPaymentPopupFeatures, isBuiltInAlipayMethod, isBuiltInWxpayMethod } from '@/components/payment/providerConfig'
@@ -344,6 +355,8 @@ const errorMessage = ref('')
 const errorHintMessage = ref('')
 const activeTab = ref<'recharge' | 'subscription'>('recharge')
 const amount = ref<number | null>(null)
+const rechargeMode = ref<RechargeMode>('balance')
+const isBlindBox = computed(() => activeTab.value === 'recharge' && rechargeMode.value === 'blind_box' && checkout.value.blind_box?.enabled === true)
 const selectedMethod = ref('')
 const selectedPlan = ref<SubscriptionPlan | null>(null)
 const previewImage = ref('')
@@ -563,6 +576,7 @@ const subscriptionUsdToCnyRate = computed(() => {
 })
 const rechargeCredit = computed(() => calculateRechargeCredit(validAmount.value, balanceRechargeMultiplier.value, checkout.value.recharge_bonus_tiers))
 const creditedAmount = computed(() => rechargeCredit.value.total)
+const standardBlindBoxCredit = computed(() => calculateRechargeCredit(checkout.value.blind_box?.price ?? 0, balanceRechargeMultiplier.value, checkout.value.recharge_bonus_tiers).total)
 
 // Adaptive grid: center single card, 2-col for 2 plans, 3-col for 3+
 const planGridClass = computed(() => {
@@ -651,12 +665,12 @@ const methodOptions = computed<PaymentMethodOption[]>(() =>
       type,
       display_name: ml?.display_name,
       fee_rate: ml?.fee_rate ?? 0,
-      available: ml?.available !== false && amountFitsMethod(validAmount.value, type),
+      available: ml?.available !== false && amountFitsMethod(validAmount.value, type) && (!isBlindBox.value || normalizePaymentCurrency(ml?.currency) === checkout.value.blind_box?.currency),
     }
   })
 )
 
-const feeRate = computed(() => checkout.value?.recharge_fee_rate ?? 0)
+const feeRate = computed(() => isBlindBox.value ? 0 : (checkout.value?.recharge_fee_rate ?? 0))
 const feeAmount = computed(() =>
   feeRate.value > 0 && validAmount.value > 0
     ? Math.ceil(((validAmount.value * feeRate.value) / 100) * 100) / 100
@@ -670,6 +684,7 @@ const totalAmount = computed(() =>
 
 const amountError = computed(() => {
   if (validAmount.value <= 0) return ''
+  if (isBlindBox.value && selectedCurrency.value !== checkout.value.blind_box?.currency) return t('payment.blindBox.currencyRequired', { currency: checkout.value.blind_box?.currency })
   // No method can handle this amount
   if (!enabledMethods.value.some((m) => amountFitsMethod(validAmount.value, m))) {
     return t('payment.amountNoMethod')
@@ -687,6 +702,7 @@ const canSubmit = computed(() =>
   validAmount.value > 0
     && amountFitsMethod(validAmount.value, selectedMethod.value)
     && selectedLimit.value?.available !== false
+    && (!isBlindBox.value || selectedCurrency.value === checkout.value.blind_box?.currency)
 )
 
 const subPaymentAmount = computed(() => {
@@ -806,10 +822,12 @@ async function createOrder(orderAmount: number, orderType: OrderType, planId?: n
   submitting.value = true
   errorMessage.value = ''
   errorHintMessage.value = ''
+  const requestMode: RechargeMode = orderType === 'balance' && isBlindBox.value ? 'blind_box' : 'balance'
   const requestType = normalizeVisibleMethod(options.paymentType || selectedMethod.value) || options.paymentType || selectedMethod.value
   try {
     const payload = buildCreateOrderPayload({
       amount: orderAmount,
+      rechargeMode: requestMode,
       paymentType: requestType,
       orderType,
       planId,
@@ -916,6 +934,7 @@ async function createOrder(orderAmount: number, orderType: OrderType, planId?: n
             { reason: 'WECHAT_JSAPI_FAILED', message: errMsg },
             {
               orderAmount,
+              rechargeMode: requestMode,
               orderType,
               planId,
               paymentType: visibleMethod,
@@ -934,6 +953,7 @@ async function createOrder(orderAmount: number, orderType: OrderType, planId?: n
         resetPayment()
         const fallbackApplied = await attemptMobileQrFallback(err, {
           orderAmount,
+          rechargeMode: requestMode,
           orderType,
           planId,
           paymentType: visibleMethod,
@@ -963,6 +983,7 @@ async function createOrder(orderAmount: number, orderType: OrderType, planId?: n
       errorHintMessage.value = ''
     } else if (await attemptMobileQrFallback(err, {
       orderAmount,
+      rechargeMode: requestMode,
       orderType,
       planId,
       paymentType: requestType,
@@ -989,6 +1010,7 @@ async function createOrder(orderAmount: number, orderType: OrderType, planId?: n
 }
 
 interface MobileQrFallbackContext {
+  rechargeMode?: RechargeMode
   orderAmount: number
   orderType: OrderType
   planId?: number
@@ -1038,6 +1060,7 @@ async function attemptMobileQrFallback(err: unknown, context: MobileQrFallbackCo
     const visibleMethod = normalizeVisibleMethod(context.paymentType) || context.paymentType
     const payload = buildCreateOrderPayload({
       amount: context.orderAmount,
+      rechargeMode: context.rechargeMode,
       paymentType: visibleMethod,
       orderType: context.orderType,
       planId: context.planId,

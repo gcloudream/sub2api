@@ -69,3 +69,38 @@ describe('AmountInput bonus offers', () => {
     expect(wrapper.emitted('update:modelValue')).toEqual([[20], [20]])
   })
 })
+
+describe('AmountInput explicit mystery box selection', () => {
+  const config = { enabled: true, price: 9.9, currency: 'CNY', min: 50, max: 100, daily_limit: 1, rules_version: 'test-v1', probabilities: [] }
+
+  it('replaces only the matching preset with the API mystery box, preserving the other presets and bonuses', async () => {
+    const wrapper = mount(AmountInput, { props: {
+      modelValue: null, amounts: [9.9, 1, 5, 10, 20, 50, 100, 200, 500],
+      blindBox: config, currency: 'CNY', bonusTiers: [{ amount: 20, bonus_percent: 5 }],
+    } })
+    const buttons = wrapper.findAll('button')
+    expect(buttons).toHaveLength(9)
+    expect(buttons[0].text()).toContain('payment.blindBox.name')
+    expect(buttons[0].text()).toContain('50–100')
+    expect(buttons[1].text()).toBe('1')
+    expect(buttons[4].text()).toContain('额外赠送5%')
+    expect(wrapper.text()).toContain('¥')
+    await buttons[0].trigger('click')
+    expect(wrapper.emitted('select-mode')).toEqual([['blind_box']])
+    expect(wrapper.emitted('update:modelValue')).toEqual([[9.9]])
+    expect((wrapper.get('input').element as HTMLInputElement).value).toBe('')
+  })
+
+  it('exits mystery box mode when typing 9.9 or choosing a normal preset', async () => {
+    const wrapper = mount(AmountInput, { props: { modelValue: 9.9, amounts: [9.9, 1, 5], blindBox: config, rechargeMode: 'blind_box' } })
+    await wrapper.get('input').setValue('9.9')
+    await wrapper.findAll('button')[1].trigger('click')
+    expect(wrapper.emitted('select-mode')).toEqual([['balance'], ['balance']])
+    expect(wrapper.emitted('update:modelValue')).toEqual([[9.9], [1]])
+  })
+
+  it('keeps the ordinary preset while the feature is disabled', () => {
+    const wrapper = mount(AmountInput, { props: { modelValue: null, amounts: [9.9, 1, 5], blindBox: { ...config, enabled: false } } })
+    expect(wrapper.findAll('button')[0].text()).toBe('9.9')
+  })
+})

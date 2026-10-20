@@ -50,17 +50,28 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	if user.Status != payment.EntityStatusActive {
 		return nil, infraerrors.Forbidden("USER_INACTIVE", "user account is disabled")
 	}
+	if req.RechargeMode == RechargeModeBlindBox {
+		if resp, err := s.pendingBlindBoxResponse(ctx, req); err != nil || resp != nil {
+			return resp, err
+		}
+	}
 	if s.notificationEmailService != nil {
 		s.notificationEmailService.RememberRecipientLocale(ctx, req.UserID, user.Email, req.Locale)
 	}
 	orderAmount, limitAmount := calculateCreateOrderAmounts(req, plan, cfg)
 	feeRate := cfg.RechargeFeeRate
+	if req.RechargeMode == RechargeModeBlindBox {
+		feeRate = 0
+	}
 	methodCurrency := payment.DefaultPaymentCurrency
 	if s.configService != nil {
 		methodCurrency, err = s.configService.ValidateMethodCurrencyConsistency(ctx, req.PaymentType)
 		if err != nil {
 			return nil, err
 		}
+	}
+	if req.RechargeMode == RechargeModeBlindBox && methodCurrency != "CNY" {
+		return nil, infraerrors.BadRequest("BLIND_BOX_CURRENCY_UNSUPPORTED", "blind box requires a CNY payment method")
 	}
 	payAmountStr, payAmount, err := calculateCreateOrderPayAmountForOrderType(limitAmount, feeRate, methodCurrency, req.OrderType, cfg.SubscriptionUSDToCNYRate)
 	if err != nil {
@@ -76,6 +87,9 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	selectedCurrency := payment.DefaultPaymentCurrency
 	if sel != nil {
 		selectedCurrency = paymentProviderConfigCurrency(sel.ProviderKey, sel.Config)
+	}
+	if req.RechargeMode == RechargeModeBlindBox && selectedCurrency != "CNY" {
+		return nil, infraerrors.BadRequest("BLIND_BOX_CURRENCY_UNSUPPORTED", "blind box requires a CNY payment method")
 	}
 	if selectedCurrency != methodCurrency {
 		payAmountStr, payAmount, err = calculateCreateOrderPayAmountForOrderType(limitAmount, feeRate, selectedCurrency, req.OrderType, cfg.SubscriptionUSDToCNYRate)
@@ -99,7 +113,8 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	}
 	resp, err := s.invokeProvider(ctx, order, req, cfg, limitAmount, payAmountStr, payAmount, plan, sel)
 	if err != nil {
-		_, _ = s.entClient.PaymentOrder.UpdateOneID(order.ID).
+		_, _ = s.entClient.PaymentOrder.Update().
+			Where(paymentorder.IDEQ(order.ID), paymentorder.StatusEQ(OrderStatusPending), paymentorder.PaidAtIsNil()).
 			SetStatus(OrderStatusFailed).
 			Save(ctx)
 		return nil, err
@@ -111,6 +126,9 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 // Payment fees and limits continue to use the original recharge amount, while
 // subscription prices never receive balance recharge offers.
 func calculateCreateOrderAmounts(req CreateOrderRequest, plan *dbent.SubscriptionPlan, cfg *PaymentConfig) (orderAmount, limitAmount float64) {
+	if req.RechargeMode == RechargeModeBlindBox {
+		return 0, BlindBoxPrice
+	}
 	if plan != nil {
 		return plan.Price, plan.Price
 	}
@@ -121,6 +139,9 @@ func calculateCreateOrderAmounts(req CreateOrderRequest, plan *dbent.Subscriptio
 }
 
 func (s *PaymentService) validateOrderInput(ctx context.Context, req CreateOrderRequest, cfg *PaymentConfig) (*dbent.SubscriptionPlan, error) {
+	if err := validateBlindBoxRequest(req, cfg); err != nil {
+		return nil, err
+	}
 	if req.OrderType == payment.OrderTypeBalance && cfg.BalanceDisabled {
 		return nil, infraerrors.Forbidden("BALANCE_PAYMENT_DISABLED", "balance recharge has been disabled")
 	}
@@ -161,6 +182,12 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	createdAt := time.Now()
+	if req.RechargeMode == RechargeModeBlindBox {
+		if err := s.reserveBlindBoxQuota(ctx, tx, req.UserID, createdAt); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.checkPendingLimit(ctx, tx, req.UserID, cfg.MaxPendingOrders); err != nil {
 		return nil, err
 	}
@@ -176,7 +203,7 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 	if err != nil {
 		return nil, err
 	}
-	providerSnapshot := buildPaymentOrderProviderSnapshot(sel, req)
+	providerSnapshot := addBlindBoxSnapshot(buildPaymentOrderProviderSnapshot(sel, req), req, cfg, createdAt)
 	selectedInstanceID := ""
 	selectedProviderKey := ""
 	if sel != nil {
@@ -184,6 +211,7 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 		selectedProviderKey = strings.TrimSpace(sel.ProviderKey)
 	}
 	b := tx.PaymentOrder.Create().
+		SetCreatedAt(createdAt).
 		SetUserID(req.UserID).
 		SetUserEmail(user.Email).
 		SetUserName(user.Username).
@@ -419,7 +447,7 @@ func (s *PaymentService) invokeProvider(ctx context.Context, order *dbent.Paymen
 		return nil, infraerrors.ServiceUnavailable("PAYMENT_PROVIDER_MISCONFIGURED", "provider_misconfigured").
 			WithMetadata(map[string]string{"provider": sel.ProviderKey, "instance_id": sel.InstanceID})
 	}
-	subject := s.buildPaymentSubject(plan, limitAmount, cfg, sel)
+	subject := s.buildCreateOrderPaymentSubject(req, plan, limitAmount, cfg, sel)
 	outTradeNo := order.OutTradeNo
 	canonicalReturnURL, err := CanonicalizeReturnURL(req.ReturnURL, req.SrcHost, req.SrcURL)
 	if err != nil {
@@ -535,6 +563,13 @@ func selectedInstanceSupportedTypes(sel *payment.InstanceSelection) string {
 		return ""
 	}
 	return sel.SupportedTypes
+}
+
+func (s *PaymentService) buildCreateOrderPaymentSubject(req CreateOrderRequest, plan *dbent.SubscriptionPlan, limitAmount float64, cfg *PaymentConfig, sel *payment.InstanceSelection) string {
+	if req.RechargeMode == RechargeModeBlindBox {
+		return applyPaymentProductNameAffix("额度盲盒 9.90 CNY（随机50-100额度）", cfg)
+	}
+	return s.buildPaymentSubject(plan, limitAmount, cfg, sel)
 }
 
 func (s *PaymentService) buildPaymentSubject(plan *dbent.SubscriptionPlan, limitAmount float64, cfg *PaymentConfig, sel *payment.InstanceSelection) string {
@@ -737,6 +772,8 @@ func classifyCreatePaymentError(req CreateOrderRequest, providerKey string, err 
 
 func buildCreateOrderResponse(order *dbent.PaymentOrder, req CreateOrderRequest, payAmount float64, sel *payment.InstanceSelection, pr *payment.CreatePaymentResponse, resultType payment.CreatePaymentResultType) *CreateOrderResponse {
 	return &CreateOrderResponse{
+		RechargeMode: PaymentOrderRechargeMode(order),
+		BlindBox:     BlindBoxResult(order),
 		OrderID:      order.ID,
 		Amount:       order.Amount,
 		PayAmount:    payAmount,

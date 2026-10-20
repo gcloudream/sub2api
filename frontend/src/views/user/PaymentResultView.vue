@@ -55,7 +55,7 @@
               <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.payAmount') }}</span>
               <span class="font-bold text-primary-600 dark:text-primary-400">{{ formatGatewayAmount(order.pay_amount) }}</span>
             </div>
-            <div v-if="hasAmountFields(order) && order.amount !== order.pay_amount" class="flex justify-between">
+            <div v-if="hasAmountFields(order) && !isBlindBoxOrder(order) && order.amount !== order.pay_amount" class="flex justify-between">
               <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.creditedAmount') }}</span>
               <span class="font-medium text-gray-900 dark:text-white">{{ order.order_type === 'balance' ? '$' + order.amount.toFixed(2) : formatGatewayAmount(order.amount) }}</span>
             </div>
@@ -69,8 +69,9 @@
             </div>
           </div>
         </div>
+        <BlindBoxOrderResult v-if="order && isBlindBoxOrder(order)" :order="order" />
         <!-- EasyPay return info (when no order loaded) -->
-        <div v-else-if="returnInfo" class="rounded-xl bg-white p-5 shadow-sm dark:bg-dark-800">
+        <div v-if="!order && returnInfo" class="rounded-xl bg-white p-5 shadow-sm dark:bg-dark-800">
           <div class="space-y-3 text-sm">
             <div v-if="returnInfo.outTradeNo" class="flex justify-between">
               <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.orderId') }}</span>
@@ -101,6 +102,8 @@ import { ref, computed, onBeforeUnmount, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import OrderStatusBadge from '@/components/payment/OrderStatusBadge.vue'
+import BlindBoxOrderResult from '@/components/payment/BlindBoxOrderResult.vue'
+import { completedBlindBoxAmount, isBlindBoxAwaitingFulfillment, isBlindBoxOrder } from '@/components/payment/blindBox'
 import {
   PAYMENT_RECOVERY_STORAGE_KEY,
   clearPaymentRecoverySnapshot,
@@ -170,11 +173,11 @@ const localeCode = computed(() => {
 })
 
 const isSuccess = computed(() => {
-  return isSuccessStatus(order.value?.status)
+  return isBlindBoxOrder(order.value) ? completedBlindBoxAmount(order.value) !== null : isSuccessStatus(order.value?.status)
 })
 
 const isPending = computed(() => {
-  return isPendingStatus(order.value?.status)
+  return isAwaitingOrder(order.value)
 })
 
 const statusTitle = computed(() => {
@@ -234,11 +237,16 @@ function normalizeOrderStatus(status: string | null | undefined): string {
 }
 
 function displayOrderStatus(status: string): OrderStatus {
+  if (normalizeOrderStatus(status) === 'FAILED' && isBlindBoxAwaitingFulfillment(order.value)) return 'RECHARGING'
   return normalizeOrderStatus(status) as OrderStatus
 }
 
 function isSuccessStatus(status: string | null | undefined): boolean {
   return SUCCESS_STATUSES.has(normalizeOrderStatus(status))
+}
+
+function isAwaitingOrder(nextOrder: ResolvedOrder | null): boolean {
+  return isPendingStatus(nextOrder?.status) || isBlindBoxAwaitingFulfillment(nextOrder)
 }
 
 function isPendingStatus(status: string | null | undefined): boolean {
@@ -330,7 +338,7 @@ function clearRecoverySnapshot(): void {
 
 function clearRecoverySnapshotForTerminalStatus(status: string | null | undefined): void {
   if (!status) return
-  if (!isPendingStatus(status)) {
+  if (!isPendingStatus(status) && !isBlindBoxAwaitingFulfillment(order.value)) {
     clearRecoverySnapshot()
   }
 }
@@ -349,7 +357,7 @@ function scheduleStatusRefresh(refreshOrder: (() => Promise<ResolvedOrder | null
       clearRecoverySnapshotForTerminalStatus(refreshedOrder.status)
     }
 
-    if (isPendingStatus(order.value?.status)) {
+    if (isAwaitingOrder(order.value)) {
       scheduleStatusRefresh(refreshOrder)
     }
   }, STATUS_REFRESH_INTERVAL_MS)
@@ -447,7 +455,7 @@ onMounted(async () => {
     return null
   }
 
-  if (isPendingStatus(order.value?.status)) {
+  if (isAwaitingOrder(order.value)) {
     scheduleStatusRefresh(refreshOrder)
   } else if (order.value) {
     clearRecoverySnapshotForTerminalStatus(order.value.status)

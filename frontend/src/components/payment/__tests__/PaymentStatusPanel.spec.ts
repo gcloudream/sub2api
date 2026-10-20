@@ -341,3 +341,63 @@ describe('PaymentStatusPanel', () => {
     if (originalHidden) Object.defineProperty(document, 'hidden', originalHidden)
   })
 })
+
+describe('PaymentStatusPanel saved mystery box results', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    pollOrderStatus.mockReset()
+    verifyOrder.mockReset()
+    toCanvas.mockReset().mockResolvedValue(undefined)
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('waits through paid/fulfilling states and reveals only the saved completed integer', async () => {
+    const base = { ...orderFactory('PAID'), recharge_mode: 'blind_box', amount: 0, pay_amount: 9.9, blind_box: { rules_version: 'test-v1', min: 50, max: 100, drawn: false } }
+    pollOrderStatus.mockResolvedValueOnce(base).mockResolvedValueOnce({ ...base, status: 'RECHARGING', amount: 63, blind_box: { ...base.blind_box, drawn: true, amount: 63 } }).mockResolvedValueOnce({ ...base, status: 'COMPLETED', amount: 63, blind_box: { ...base.blind_box, drawn: true, amount: 63 } })
+    const wrapper = mount(PaymentStatusPanel, { props: { orderId: 42, qrCode: 'https://pay.example.com/qr/42', expiresAt: '2099-01-01T12:30:00Z', paymentType: 'alipay', orderType: 'balance', rechargeMode: 'blind_box' }, global: { stubs: { Icon: true } } })
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+    expect(wrapper.text()).toContain('payment.result.processing')
+    expect(wrapper.text()).not.toContain('$0.00')
+    expect(wrapper.emitted('success')).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('$63')
+    expect(wrapper.emitted('success')).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+    expect(wrapper.text()).toContain('$63')
+    expect(wrapper.text()).toContain('payment.blindBox.credited')
+    expect(wrapper.emitted('success')).toHaveLength(1)
+    wrapper.unmount()
+  })
+})
+
+describe('PaymentStatusPanel paid mystery box recovery', () => {
+  beforeEach(() => { vi.useFakeTimers(); pollOrderStatus.mockReset(); verifyOrder.mockReset(); toCanvas.mockReset().mockResolvedValue(undefined) })
+  afterEach(() => vi.useRealTimers())
+  it.each([
+    { drawn: true, amount: 64 },
+    { drawn: false, paid_at: '2026-10-20T14:00:00+08:00' },
+  ])('keeps a paid FAILED blind box processing without another payment prompt (%j)', async (evidence) => {
+    const order = { ...orderFactory('FAILED'), amount: 0, pay_amount: 9.9, recharge_mode: 'blind_box', paid_at: evidence.paid_at, blind_box: { rules_version: 'test-v1', min: 50, max: 100, drawn: evidence.drawn, amount: evidence.amount } }
+    pollOrderStatus.mockResolvedValue(order)
+    const wrapper = mount(PaymentStatusPanel, { props: { orderId: 42, qrCode: 'https://pay.example.com/qr/42', expiresAt: new Date(Date.now() + 6000).toISOString(), paymentType: 'alipay', orderType: 'balance', rechargeMode: 'blind_box' }, global: { stubs: { Icon: true } } })
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+    expect(wrapper.text()).toContain('payment.result.processing')
+    expect(wrapper.text()).not.toContain('payment.qr.expired')
+    expect(wrapper.find('canvas').exists()).toBe(false)
+    expect(wrapper.emitted('success')).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(6000)
+    await flushPromises()
+    expect(pollOrderStatus).toHaveBeenCalledTimes(3)
+    expect(wrapper.text()).toContain('payment.result.processing')
+    pollOrderStatus.mockResolvedValue({ ...order, status: 'COMPLETED', amount: 64, blind_box: { ...order.blind_box, drawn: true, amount: 64 } })
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+    expect(wrapper.text()).toContain('$64')
+    expect(wrapper.emitted('success')).toHaveLength(1)
+    wrapper.unmount()
+  })
+})

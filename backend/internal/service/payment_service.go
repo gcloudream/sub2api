@@ -83,11 +83,14 @@ type CreateOrderRequest struct {
 	ReturnURL       string
 	PaymentSource   string
 	OrderType       string
+	RechargeMode    string
 	PlanID          int64
 	Locale          string
 }
 
 type CreateOrderResponse struct {
+	RechargeMode                  string                          `json:"recharge_mode"`
+	BlindBox                      *BlindBoxOrderResult            `json:"blind_box,omitempty"`
 	OrderID                       int64                           `json:"order_id"`
 	Amount                        float64                         `json:"amount"`
 	PayAmount                     float64                         `json:"pay_amount"`
