@@ -15,9 +15,13 @@ func TestRechargeBonusFulfillmentUsesStoredAmountExactlyOnce(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		storedCredit float64
+		payAmount    float64
+		bonusAmount  float64
 	}{
-		{name: "new bonus order", storedCredit: 126},
-		{name: "existing order keeps its original credit", storedCredit: 120},
+		{name: "Fantasy fixed bonus order", storedCredit: 126, payAmount: 20, bonusAmount: 6},
+		{name: "official threshold order", storedCredit: 144, payAmount: 20, bonusAmount: 24},
+		{name: "official discount order", storedCredit: 120, payAmount: 16, bonusAmount: 24},
+		{name: "existing order keeps its original credit", storedCredit: 120, payAmount: 20},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -27,7 +31,7 @@ func TestRechargeBonusFulfillmentUsesStoredAmountExactlyOnce(t *testing.T) {
 			order, err := client.PaymentOrder.UpdateOneID(order.ID).
 				SetOrderType(payment.OrderTypeBalance).
 				ClearPlanID().ClearSubscriptionGroupID().ClearSubscriptionDays().
-				SetAmount(tc.storedCredit).SetPayAmount(20).
+				SetAmount(tc.storedCredit).SetPayAmount(tc.payAmount).SetBonusAmount(tc.bonusAmount).
 				Save(ctx)
 			require.NoError(t, err)
 
@@ -54,7 +58,8 @@ func TestRechargeBonusFulfillmentUsesStoredAmountExactlyOnce(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, OrderStatusCompleted, reloaded.Status)
 			require.Equal(t, tc.storedCredit, reloaded.Amount)
-			require.Equal(t, float64(20), reloaded.PayAmount)
+			require.Equal(t, tc.payAmount, reloaded.PayAmount)
+			require.Equal(t, tc.bonusAmount, reloaded.BonusAmount)
 		})
 	}
 }

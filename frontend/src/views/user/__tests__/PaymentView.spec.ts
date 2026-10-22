@@ -396,7 +396,7 @@ describe('PaymentView recharge rate preview', () => {
     })
     await flushPromises()
     const input = wrapper.getComponent(AmountInput)
-    expect(input.props('bonusTiers')).toEqual([{ amount: 20, bonus_percent: 5 }])
+    expect(input.props('fixedBonusTiers')).toEqual([{ amount: 20, bonus_percent: 5 }])
     input.vm.$emit('update:modelValue', 20)
     await flushPromises()
 
@@ -931,7 +931,7 @@ describe('PaymentView subscription feature flag', () => {
 
 describe('PaymentView mystery box checkout', () => {
   const box = { enabled: true, price: 9.9, currency: 'CNY', min: 50, max: 100, daily_limit: 1, rules_version: 'test-v1', probabilities: [] }
-  async function mountBox(rechargeFeeRate = 0) {
+  async function mountBox(rechargeFeeRate = 0, offers: Partial<CheckoutInfoResponse> = {}) {
     vi.useRealTimers()
     window.localStorage.clear()
     routeState.path = '/purchase'
@@ -941,7 +941,7 @@ describe('PaymentView mystery box checkout', () => {
       order_id: 88, amount: 0, pay_amount: 9.9, fee_rate: 0, currency: 'CNY',
       qr_code: 'https://pay.example.test/88', expires_at: '2099-01-01T00:00:00Z', recharge_mode: 'blind_box',
     })
-    getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture({ balance_recharge_multiplier: 6, blind_box: box, recharge_fee_rate: rechargeFeeRate }))
+    getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture({ balance_recharge_multiplier: 6, blind_box: box, recharge_fee_rate: rechargeFeeRate, ...offers }))
     const wrapper = shallowMount(PaymentView, { global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, Teleport: true, Transition: false } } })
     await flushPromises()
     return wrapper
@@ -981,6 +981,27 @@ describe('PaymentView mystery box checkout', () => {
     wrapper.unmount()
   })
 
+  it('bypasses configured discounts and fixed bonuses for mystery box orders', async () => {
+    const wrapper = await mountBox(10, {
+      recharge_bonus_tiers: [{ min_amount: 1, bonus_percent: 20 }],
+      recharge_bonus_mode: 'discount',
+      recharge_fixed_bonus_tiers: [{ amount: 9.9, bonus_percent: 50 }],
+    })
+    const input = wrapper.getComponent(AmountInput)
+    input.vm.$emit('select-mode', 'blind_box')
+    input.vm.$emit('update:modelValue', 9.9)
+    await flushPromises()
+    const button = wrapper.findAll('button').find(button => button.text().includes('payment.createOrder'))!
+    expect(button.text()).toContain(formatPaymentAmount(9.9, 'CNY'))
+    expect(wrapper.find('[data-testid="recharge-discount-row"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="recharge-bonus-row"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="recharge-credited-row"]').exists()).toBe(false)
+    await button.trigger('click')
+    await flushPromises()
+    expect(createOrder).toHaveBeenCalledWith(expect.objectContaining({ amount: 9.9, recharge_mode: 'blind_box' }))
+    wrapper.unmount()
+  })
+
   it('uses fixed ordinary recharge when the custom field selects the same 9.9 price', async () => {
     const wrapper = await mountBox()
     const input = wrapper.getComponent(AmountInput)
@@ -996,6 +1017,47 @@ describe('PaymentView mystery box checkout', () => {
     await button.trigger('click')
     await flushPromises()
     expect(createOrder.mock.calls[0][0]).not.toHaveProperty('recharge_mode')
+    wrapper.unmount()
+  })
+})
+
+
+describe('PaymentView merged recharge offers', () => {
+  async function mountOffers(offers: Partial<CheckoutInfoResponse>) {
+    vi.useRealTimers()
+    routeState.path = '/purchase'
+    routeState.query = {}
+    window.localStorage.clear()
+    appStoreState.setPublicSettings({ subscription_enabled: false })
+    getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture({ balance_recharge_multiplier: 6, ...offers }))
+    const wrapper = shallowMount(PaymentView, { global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, Teleport: true, Transition: false } } })
+    await flushPromises()
+    wrapper.getComponent(AmountInput).vm.$emit('update:modelValue', 20)
+    await flushPromises()
+    return wrapper
+  }
+
+  afterEach(() => appStoreState.setPublicSettings(undefined))
+
+  it('uses the explicit fixed wire field without displaying a threshold discount', async () => {
+    const wrapper = await mountOffers({ recharge_fixed_bonus_tiers: [{ amount: 20, bonus_percent: 5 }], recharge_bonus_tiers: [] })
+    expect(wrapper.getComponent(AmountInput).props('fixedBonusTiers')).toEqual([{ amount: 20, bonus_percent: 5 }])
+    expect(wrapper.get('[data-testid="recharge-bonus-row"]').text()).toContain('+$6.00')
+    expect(wrapper.get('[data-testid="recharge-credited-row"]').text()).toContain('$126.00')
+    wrapper.unmount()
+  })
+
+  it('honors upstream discounts and ignores conflicting fixed offers', async () => {
+    const wrapper = await mountOffers({
+      recharge_fixed_bonus_tiers: [{ amount: 20, bonus_percent: 5 }],
+      recharge_bonus_tiers: [{ min_amount: 10, bonus_percent: 20 }],
+      recharge_bonus_mode: 'discount',
+    })
+    expect(wrapper.get('[data-testid="recharge-discount-row"]').text()).toContain(formatPaymentAmount(4, 'CNY'))
+    expect(wrapper.find('[data-testid="recharge-bonus-row"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="recharge-credited-row"]').text()).toContain('$120.00')
+    const button = wrapper.findAll('button').find(button => button.text().includes('payment.createOrder'))!
+    expect(button.text()).toContain(formatPaymentAmount(16, 'CNY'))
     wrapper.unmount()
   })
 })

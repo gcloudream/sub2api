@@ -52,6 +52,12 @@ export interface BlindBoxOrderInfo {
 
 // ==================== Configuration ====================
 
+/** 充值赠送档位：支付金额 ≥ min_amount 时在到账基数上赠送 bonus_percent% */
+export interface RechargeBonusTier {
+  min_amount: number
+  bonus_percent: number
+}
+
 export interface PaymentConfig {
   payment_enabled: boolean
   min_amount: number
@@ -87,7 +93,7 @@ export interface MethodLimitsResponse {
   global_max: number  // widest max across all methods; 0 = no maximum
 }
 
-export interface RechargeBonusTier {
+export interface FixedRechargeBonusTier {
   amount: number
   bonus_percent: number
 }
@@ -100,12 +106,18 @@ export interface CheckoutInfoResponse {
   plans: SubscriptionPlan[]
   balance_disabled: boolean
   balance_recharge_multiplier: number
-  /** Extra balance credit for exact recharge amounts; absent means no bonus. */
-  recharge_bonus_tiers?: RechargeBonusTier[]
+  /** Fixed Fantasy offers used only when no configured threshold offers exist. */
+  recharge_fixed_bonus_tiers?: FixedRechargeBonusTier[]
   blind_box?: BlindBoxConfig
   /** Subscription CNY conversion rate (1 USD = X CNY); 0 = disabled, plan price is charged as-is */
   subscription_usd_to_cny_rate: number
   recharge_fee_rate: number
+  /** Configured min_amount tiers; amount-shaped entries are accepted from legacy Fantasy APIs. */
+  recharge_bonus_tiers?: (RechargeBonusTier | FixedRechargeBonusTier)[]
+  /** 阶梯模式：bonus 赠金 / discount 折扣；缺失按 bonus */
+  recharge_bonus_mode?: string
+  /** 充值页金额区顶部的 Markdown 活动文案；空 = 不展示 */
+  recharge_bonus_notice?: string
   help_text: string
   help_image_url: string
   stripe_publishable_key: string
@@ -124,6 +136,8 @@ export interface PaymentOrder {
   pay_amount: number
   currency?: string
   fee_rate: number
+  /** 充值赠送额度（USD），已计入 amount */
+  bonus_amount?: number
   payment_type: string
   out_trade_no: string
   status: OrderStatus
@@ -250,6 +264,7 @@ export interface CreateOrderResult {
   payment_env?: string
   pay_amount: number
   fee_rate: number
+  bonus_amount?: number
   expires_at: string
   result_type?: CreateOrderResultType
   payment_type?: string

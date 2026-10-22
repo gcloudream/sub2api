@@ -282,6 +282,64 @@ func TestCalculateGatewayRefundAmountUsesCurrencyPrecision(t *testing.T) {
 	require.InDelta(t, 52, calculateGatewayRefundAmount(100, 103, 50, "JPY"), 1e-12)
 }
 
+func TestPrepareRefundKeepsFrozenFantasyAndOfficialOrderAmounts(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		credit float64
+		paid   float64
+		bonus  float64
+		box    bool
+	}{
+		{name: "legacy order without bonus metadata", credit: 120, paid: 20},
+		{name: "Fantasy exact bonus", credit: 126, paid: 20.5, bonus: 6},
+		{name: "official threshold bonus", credit: 144, paid: 20, bonus: 24},
+		{name: "official discount", credit: 120, paid: 16, bonus: 24},
+		{name: "paid blind box", credit: 77, paid: BlindBoxPrice, box: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			client := newPaymentConfigServiceTestClient(t)
+			user, err := client.User.Create().SetEmail("frozen-refund@example.test").SetPasswordHash("hash").SetUsername("frozen-refund").Save(ctx)
+			require.NoError(t, err)
+			instance, err := client.PaymentProviderInstance.Create().SetProviderKey(payment.TypeEasyPay).SetName("frozen-refund").SetConfig("{}").SetSupportedTypes("alipay").SetEnabled(true).SetRefundEnabled(true).Save(ctx)
+			require.NoError(t, err)
+			snapshot := map[string]any{}
+			if tc.box {
+				snapshot[blindBoxSnapshotKey] = map[string]any{"mode": RechargeModeBlindBox, "rules_version": BlindBoxRulesVersion, "draw_amount": 77, "drawn_at": time.Now().UTC().Format(time.RFC3339Nano), "standard_amount": 59.4}
+			}
+			order, err := client.PaymentOrder.Create().SetUserID(user.ID).SetUserEmail(user.Email).SetUserName(user.Username).
+				SetAmount(tc.credit).SetPayAmount(tc.paid).SetBonusAmount(tc.bonus).SetFeeRate(0).
+				SetRechargeCode("FROZEN-REFUND").SetOutTradeNo("frozen-refund").SetPaymentType(payment.TypeAlipay).SetPaymentTradeNo("frozen-refund-trade").
+				SetClientIP("127.0.0.1").SetSrcHost("refund.example.test").
+				SetProviderInstanceID(strconv.FormatInt(instance.ID, 10)).SetProviderKey(payment.TypeEasyPay).SetProviderSnapshot(snapshot).
+				SetOrderType(payment.OrderTypeBalance).SetStatus(OrderStatusCompleted).SetExpiresAt(time.Now().Add(time.Hour)).SetPaidAt(time.Now()).Save(ctx)
+			require.NoError(t, err)
+			// A later promotion change must not be used to reprice an existing order.
+			svc := &PaymentService{entClient: client, configService: &PaymentConfigService{settingRepo: &paymentConfigSettingRepoStub{values: map[string]string{
+				"BALANCE_RECHARGE_MULTIPLIER": "100",
+				SettingRechargeBonusTiers:     `[{"min_amount":0,"bonus_percent":99}]`,
+				SettingRechargeBonusMode:      RechargeBonusModeDiscount,
+			}}}}
+			full, result, err := svc.PrepareRefund(ctx, order.ID, 0, "", false, false)
+			require.NoError(t, err)
+			require.Nil(t, result)
+			require.Equal(t, tc.credit, full.RefundAmount)
+			require.Equal(t, tc.paid, full.GatewayAmount)
+			partial, result, err := svc.PrepareRefund(ctx, order.ID, tc.credit/2, "", false, false)
+			require.NoError(t, err)
+			require.Nil(t, result)
+			require.Equal(t, tc.paid/2, partial.GatewayAmount)
+			reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
+			require.NoError(t, err)
+			require.Equal(t, tc.credit, reloaded.Amount)
+			require.Equal(t, tc.bonus, reloaded.BonusAmount)
+			if tc.box {
+				require.Equal(t, 77, *BlindBoxResult(reloaded).Amount)
+			}
+		})
+	}
+}
+
 func TestFormatGatewayRefundAmountUsesOrderCurrency(t *testing.T) {
 	order := &dbent.PaymentOrder{
 		ProviderSnapshot: map[string]any{
@@ -299,7 +357,7 @@ func TestValidateRefundProviderResponseAcceptsPending(t *testing.T) {
 	require.Error(t, validateRefundProviderResponse(nil))
 }
 
-func TestFinishRefundPendingMarksOrderPendingAndRollsBackDeduction(t *testing.T) {
+func TestFinishRefundPendingMarksOrderPendingAndHoldsDeduction(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)
 
@@ -357,8 +415,8 @@ func TestFinishRefundPendingMarksOrderPendingAndRollsBackDeduction(t *testing.T)
 	require.NotNil(t, result)
 	require.False(t, result.Success)
 	require.Contains(t, result.Warning, "pending confirmation")
-	require.Equal(t, 40.0, rolledBack)
-	require.Zero(t, plan.BalanceToDeduct)
+	require.Zero(t, rolledBack, "deduction must stay held while the gateway refund is pending")
+	require.Equal(t, 40.0, plan.BalanceToDeduct)
 
 	reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
 	require.NoError(t, err)
@@ -373,6 +431,11 @@ func TestFinishRefundPendingMarksOrderPendingAndRollsBackDeduction(t *testing.T)
 		Count(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 1, pendingAudits)
+	detail, err := svc.latestRefundPendingDetail(ctx, order.ID)
+	require.NoError(t, err)
+	require.True(t, detail.DeductionHeld)
+	require.Equal(t, payment.DeductionTypeBalance, detail.DeductionType)
+	require.Equal(t, 40.0, detail.BalanceDeducted)
 	successAudits, err := client.PaymentAuditLog.Query().
 		Where(paymentauditlog.OrderIDEQ(strconv.FormatInt(order.ID, 10)), paymentauditlog.ActionEQ("REFUND_SUCCESS")).
 		Count(ctx)
@@ -502,6 +565,26 @@ func TestQueryAndFinalizeRefundFinalizesProviderStatuses(t *testing.T) {
 	}
 }
 
+func TestQueryAndFinalizeRefundPassesPendingAuditTimeToProvider(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	order := createPendingRefundOrderForTest(t, ctx, client, "query-requested-at")
+	pendingAudit, err := client.PaymentAuditLog.Query().
+		Where(paymentauditlog.OrderIDEQ(strconv.FormatInt(order.ID, 10)), paymentauditlog.ActionEQ("REFUND_PENDING")).
+		Only(ctx)
+	require.NoError(t, err)
+
+	svc := &PaymentService{entClient: client, loadBalancer: &captureLoadBalancer{}, userRepo: &mockUserRepo{}}
+	prov := &refundQueryProviderTestDouble{refundResponse: &payment.RefundResponse{RefundID: "rf_test", Status: payment.ProviderStatusPending}}
+	restore := replacePaymentProviderFactoryForTest(t, prov)
+	defer restore()
+
+	_, err = svc.QueryAndFinalizeRefund(ctx, order.ID)
+	require.NoError(t, err)
+	require.Equal(t, "rf_test", prov.lastQuery.RefundID)
+	require.True(t, pendingAudit.CreatedAt.Equal(prov.lastQuery.RequestedAt), "RequestedAt = %v, want %v", prov.lastQuery.RequestedAt, pendingAudit.CreatedAt)
+}
+
 func TestFinalizePendingRefundSuccessRejectsStaleCallerBeforeSecondDeduction(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)
@@ -586,6 +669,11 @@ func TestQueryAndFinalizeRefundUnsupportedProviderReturnsClearError(t *testing.T
 
 func createPendingRefundOrderForTest(t *testing.T, ctx context.Context, client *dbent.Client, suffix string) *dbent.PaymentOrder {
 	t.Helper()
+	return createPendingRefundOrderWithDetailForTest(t, ctx, client, suffix, `{"refundID":"rf_test","deductionRollbackOK":true}`)
+}
+
+func createPendingRefundOrderWithDetailForTest(t *testing.T, ctx context.Context, client *dbent.Client, suffix, pendingDetail string) *dbent.PaymentOrder {
+	t.Helper()
 
 	user, err := client.User.Create().
 		SetEmail(suffix + "@example.com").
@@ -631,7 +719,7 @@ func createPendingRefundOrderForTest(t *testing.T, ctx context.Context, client *
 		SetOrderID(strconv.FormatInt(order.ID, 10)).
 		SetAction("REFUND_PENDING").
 		SetOperator("admin").
-		SetDetail(`{"refundID":"rf_test","deductionRollbackOK":true}`).
+		SetDetail(pendingDetail).
 		Save(ctx)
 	require.NoError(t, err)
 	return order
@@ -671,8 +759,10 @@ func (refundProviderTestDouble) Refund(context.Context, payment.RefundRequest) (
 type refundQueryProviderTestDouble struct {
 	refundProviderTestDouble
 	refundResponse *payment.RefundResponse
+	lastQuery      payment.RefundQueryRequest
 }
 
-func (p *refundQueryProviderTestDouble) QueryRefund(context.Context, payment.RefundQueryRequest) (*payment.RefundResponse, error) {
+func (p *refundQueryProviderTestDouble) QueryRefund(_ context.Context, req payment.RefundQueryRequest) (*payment.RefundResponse, error) {
+	p.lastQuery = req
 	return p.refundResponse, nil
 }

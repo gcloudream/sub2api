@@ -59,7 +59,8 @@ func TestBlindBoxRequestValidationAndOrdinaryRechargePreserved(t *testing.T) {
 	base := CreateOrderRequest{Amount: 9.9, OrderType: payment.OrderTypeBalance, RechargeMode: RechargeModeBlindBox}
 	_, err := svc.validateOrderInput(context.Background(), base, cfg)
 	require.NoError(t, err)
-	amount, limit := calculateCreateOrderAmounts(base, nil, cfg)
+	amount, limit, bonus := calculateCreateOrderAmounts(base, nil, cfg, "CNY")
+	require.Zero(t, bonus)
 	require.Zero(t, amount)
 	require.Equal(t, 9.9, limit)
 	for _, invalid := range []float64{0, 9.89, 9.90001, 10, math.NaN(), math.Inf(1)} {
@@ -88,11 +89,12 @@ func TestBlindBoxRequestValidationAndOrdinaryRechargePreserved(t *testing.T) {
 	base.RechargeMode = ""
 	_, err = svc.validateOrderInput(context.Background(), base, cfg)
 	require.NoError(t, err)
-	amount, limit = calculateCreateOrderAmounts(base, nil, cfg)
+	amount, limit, bonus = calculateCreateOrderAmounts(base, nil, cfg, "CNY")
+	require.Zero(t, bonus)
 	require.Equal(t, 59.4, amount)
 	require.Equal(t, 9.9, limit)
 	base.Amount = 20
-	amount, _ = calculateCreateOrderAmounts(base, nil, cfg)
+	amount, _, _ = calculateCreateOrderAmounts(base, nil, cfg, "CNY")
 	require.Equal(t, 126.0, amount)
 	require.False(t, (&PaymentConfigService{}).parsePaymentConfig(map[string]string{}).BlindBoxEnabled)
 	require.True(t, (&PaymentConfigService{}).parsePaymentConfig(map[string]string{SettingBlindBoxEnabled: "true"}).BlindBoxEnabled)
@@ -108,7 +110,7 @@ func createBlindBoxTestUser(t *testing.T, client *dbent.Client) *User {
 func createBlindBoxTestOrder(t *testing.T, svc *PaymentService, u *User) *dbent.PaymentOrder {
 	t.Helper()
 	req := CreateOrderRequest{UserID: u.ID, Amount: 9.9, OrderType: payment.OrderTypeBalance, PaymentType: payment.TypeAlipay, RechargeMode: RechargeModeBlindBox}
-	o, err := svc.createOrderInTx(context.Background(), req, u, nil, &PaymentConfig{BlindBoxEnabled: true, BalanceRechargeMultiplier: 6, MaxPendingOrders: 3}, 0, 9.9, 0, 9.9, &payment.InstanceSelection{InstanceID: "1", ProviderKey: payment.TypeEasyPay, PaymentMode: "qrcode", Config: map[string]string{"pid": "test-merchant"}})
+	o, err := svc.createOrderInTx(context.Background(), req, u, nil, &PaymentConfig{BlindBoxEnabled: true, BalanceRechargeMultiplier: 6, MaxPendingOrders: 3}, 0, 9.9, 0, 9.9, 0, &payment.InstanceSelection{InstanceID: "1", ProviderKey: payment.TypeEasyPay, PaymentMode: "qrcode", Config: map[string]string{"pid": "test-merchant"}})
 	require.NoError(t, err)
 	return o
 }
@@ -252,7 +254,7 @@ func TestBlindBoxConcurrentCreationCannotBypassQuota(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := svc.createOrderInTx(ctx, CreateOrderRequest{UserID: u.ID, Amount: 9.9, OrderType: payment.OrderTypeBalance, RechargeMode: RechargeModeBlindBox, PaymentType: payment.TypeAlipay}, u, nil, &PaymentConfig{MaxPendingOrders: 3, BalanceRechargeMultiplier: 6}, 0, 9.9, 0, 9.9, nil)
+			_, err := svc.createOrderInTx(ctx, CreateOrderRequest{UserID: u.ID, Amount: 9.9, OrderType: payment.OrderTypeBalance, RechargeMode: RechargeModeBlindBox, PaymentType: payment.TypeAlipay}, u, nil, &PaymentConfig{MaxPendingOrders: 3, BalanceRechargeMultiplier: 6}, 0, 9.9, 0, 9.9, 0, nil)
 			success <- err == nil
 		}()
 	}

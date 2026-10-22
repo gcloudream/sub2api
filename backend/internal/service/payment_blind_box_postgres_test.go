@@ -86,7 +86,7 @@ func TestBlindBoxPostgresConcurrency(t *testing.T) {
 					UserID: user.ID, Amount: BlindBoxPrice, PaymentType: payment.TypeAlipay,
 					OrderType: payment.OrderTypeBalance, RechargeMode: RechargeModeBlindBox,
 				}, actor, nil, &PaymentConfig{BlindBoxEnabled: true, BalanceRechargeMultiplier: 6, MaxPendingOrders: 3},
-					0, BlindBoxPrice, 0, BlindBoxPrice, &payment.InstanceSelection{
+					0, BlindBoxPrice, 0, BlindBoxPrice, 0, &payment.InstanceSelection{
 						InstanceID: "1", ProviderKey: payment.TypeEasyPay, PaymentMode: "qrcode",
 						Config: map[string]string{"pid": "isolated-test-merchant"},
 					})

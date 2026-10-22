@@ -9,17 +9,21 @@ import (
 
 const defaultBalanceRechargeMultiplier = 1.0
 
-// RechargeBonusTier grants extra balance for an exact recharge amount. Percent
+// FixedRechargeBonusTier grants extra balance for an exact recharge amount. Percent
 // values are whole percentages (5 means an additional 5% of the base credit).
-type RechargeBonusTier struct {
+type FixedRechargeBonusTier struct {
 	Amount       float64 `json:"amount"`
 	BonusPercent float64 `json:"bonus_percent"`
 }
 
-// GetRechargeBonusTiers returns the same server-owned offers used to price new
-// balance orders. A fresh slice prevents callers from changing pricing rules.
-func GetRechargeBonusTiers() []RechargeBonusTier {
-	return []RechargeBonusTier{
+// GetFixedRechargeBonusTiers keeps Fantasy's exact offers as the default. An
+// explicitly configured upstream promotion takes precedence, including its zero
+// percent tiers, so the two sources can never award a combined bonus.
+func GetFixedRechargeBonusTiers(cfg *PaymentConfig) []FixedRechargeBonusTier {
+	if cfg != nil && len(cfg.RechargeBonusTiers) > 0 {
+		return []FixedRechargeBonusTier{}
+	}
+	return []FixedRechargeBonusTier{
 		{Amount: 20, BonusPercent: 5},
 		{Amount: 50, BonusPercent: 7},
 		{Amount: 100, BonusPercent: 10},
@@ -45,11 +49,15 @@ func normalizeSubscriptionUSDToCNYRate(rate float64) float64 {
 }
 
 func calculateCreditedBalance(paymentAmount, multiplier float64) float64 {
-	amount := decimal.NewFromFloat(paymentAmount)
-	baseCredit := amount.
+	return decimal.NewFromFloat(paymentAmount).
 		Mul(decimal.NewFromFloat(normalizeBalanceRechargeMultiplier(multiplier))).
-		Round(2)
-	for _, tier := range GetRechargeBonusTiers() {
+		Round(2).InexactFloat64()
+}
+
+func calculateFixedRechargeCredit(paymentAmount, multiplier float64) float64 {
+	amount := decimal.NewFromFloat(paymentAmount)
+	baseCredit := decimal.NewFromFloat(calculateCreditedBalance(paymentAmount, multiplier))
+	for _, tier := range GetFixedRechargeBonusTiers(nil) {
 		// Match before rounding: nearby custom amounts must not inherit a tier.
 		if amount.Equal(decimal.NewFromFloat(tier.Amount)) {
 			bonus := baseCredit.Mul(decimal.NewFromFloat(tier.BonusPercent)).Div(decimal.NewFromInt(100)).Round(2)

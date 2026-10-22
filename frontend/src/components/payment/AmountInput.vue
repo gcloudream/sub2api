@@ -5,17 +5,18 @@
       <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
         {{ t('payment.quickAmounts') }}
       </label>
-      <div class="grid grid-cols-3 gap-2">
+      <div class="grid grid-cols-3 gap-x-4 gap-y-4 pt-2">
         <button
           v-for="preset in presets"
           :key="preset.blindBox ? 'blind-box' : preset.amount"
           type="button"
           :class="[
-            'flex h-[52px] min-w-0 items-center justify-center rounded-lg border-2 px-2 text-center text-base font-medium leading-5 transition-colors sm:px-4',
+            'flex h-[52px] min-w-0 flex-col items-center justify-center rounded-lg border-2 px-2 text-center text-base font-medium leading-5 transition-colors sm:px-4',
             modelValue === preset.amount && (rechargeMode === 'blind_box') === preset.blindBox
               ? 'border-primary-500 bg-primary-50 text-primary-700 dark:border-primary-400 dark:bg-primary-900/40 dark:text-primary-300'
               : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-dark-500',
           ]"
+          :data-testid="preset.blindBox ? 'quick-amount-blind-box' : `quick-amount-${preset.amount}`"
           @click="selectAmount(preset.amount, preset.blindBox)"
         >
           <span
@@ -25,10 +26,16 @@
             <span>{{ preset.amount }}</span>
             <span v-if="preset.blindBox && blindBox" class="text-xs leading-3">{{ t('payment.blindBox.name') }}</span>
             <span
-              v-if="!preset.blindBox && bonusPercent(preset.amount) > 0"
+              v-if="!preset.blindBox && quoteFor(preset.amount).percent > 0"
               class="text-xs font-medium text-green-600 dark:text-green-400"
-            >{{ t('payment.extraBonus', { percent: bonusPercent(preset.amount) }) }}</span>
+              data-testid="quick-amount-bonus-badge"
+            >{{ bonusTiers.length ? badgeText(preset.amount) : t('payment.extraBonus', { percent: quoteFor(preset.amount).percent }) }}</span>
           </span>
+          <span
+            v-if="showSecondLine && !preset.blindBox"
+            class="mt-0.5 block text-[11px] font-normal leading-tight text-gray-500 dark:text-gray-400"
+            data-testid="quick-amount-credited"
+          >{{ secondLine(preset.amount) }}</span>
         </button>
       </div>
     </div>
@@ -58,26 +65,34 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { currencySymbol } from './currency'
-import type { BlindBoxConfig, RechargeMode, RechargeBonusTier } from '@/types/payment'
-import { getRechargeBonusPercent } from './rechargeBonus'
+import type { BlindBoxConfig, RechargeMode, RechargeBonusTier, FixedRechargeBonusTier } from '@/types/payment'
+import { formatRechargeBonusNumber, type RechargeBonusMode } from '@/utils/rechargeBonus'
+import { quoteRechargeWithFixedBonus } from './rechargeBonus'
+import { currencySymbol, formatPaymentAmount } from './currency'
 
 const props = withDefaults(defineProps<{
   amounts?: number[]
-  bonusTiers?: RechargeBonusTier[]
   blindBox?: BlindBoxConfig
   rechargeMode?: RechargeMode
-  currency?: string
   modelValue: number | null
   min?: number
   max?: number
+  /** Configured upstream threshold offers. These take priority over Fantasy fixed offers. */
+  bonusTiers?: RechargeBonusTier[]
+  fixedBonusTiers?: FixedRechargeBonusTier[]
+  bonusMode?: RechargeBonusMode
+  multiplier?: number
+  currency?: string
 }>(), {
   amounts: () => [10, 20, 50, 100, 200, 500, 1000, 2000, 5000],
-  bonusTiers: () => [],
   rechargeMode: 'balance',
-  currency: 'USD',
   min: 0,
   max: 0,
+  bonusTiers: () => [],
+  fixedBonusTiers: () => [],
+  bonusMode: 'bonus',
+  multiplier: 1,
+  currency: 'USD',
 })
 
 const emit = defineEmits<{
@@ -88,10 +103,6 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const customText = ref('')
-
-function bonusPercent(amount: number) {
-  return getRechargeBonusPercent(amount, props.bonusTiers)
-}
 
 // 0 = no limit
 const filteredAmounts = computed(() =>
@@ -108,6 +119,41 @@ const presets = computed(() => {
   }
   return amounts
 })
+
+const showSecondLine = computed(() => props.bonusTiers.length > 0)
+
+function currencyDigits(): number {
+  if (!props.currency) return 2
+  try {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency: props.currency }).resolvedOptions().maximumFractionDigits ?? 2
+  } catch {
+    return 2
+  }
+}
+
+function quoteFor(amt: number) {
+  return quoteRechargeWithFixedBonus(amt, {
+    tiers: props.bonusTiers,
+    fixedTiers: props.fixedBonusTiers,
+    multiplier: props.multiplier,
+    mode: props.bonusMode,
+    currencyDigits: currencyDigits(),
+  })
+}
+
+// 价签文案：赠金「+20%」，折扣「20% OFF」
+function badgeText(amt: number): string {
+  const percent = formatRechargeBonusNumber(quoteFor(amt).percent)
+  return props.bonusMode === 'discount' ? `${percent}% OFF` : `+${percent}%`
+}
+
+function secondLine(amt: number): string {
+  const quote = quoteFor(amt)
+  if (props.bonusMode === 'discount') {
+    return t('payment.rechargeBonus.payShort', { amount: formatPaymentAmount(quote.payBase, props.currency) })
+  }
+  return t('payment.rechargeBonus.creditedShort', { amount: '$' + quote.credited.toFixed(2) })
+}
 
 const placeholderText = computed(() => {
   if (props.min > 0 && props.max > 0) return `${props.min} - ${props.max}`

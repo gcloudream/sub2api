@@ -58,7 +58,6 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	if s.notificationEmailService != nil {
 		s.notificationEmailService.RememberRecipientLocale(ctx, req.UserID, user.Email, req.Locale)
 	}
-	orderAmount, limitAmount := calculateCreateOrderAmounts(req, plan, cfg)
 	feeRate := cfg.RechargeFeeRate
 	if req.RechargeMode == RechargeModeBlindBox {
 		feeRate = 0
@@ -73,6 +72,7 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	if req.RechargeMode == RechargeModeBlindBox && methodCurrency != "CNY" {
 		return nil, infraerrors.BadRequest("BLIND_BOX_CURRENCY_UNSUPPORTED", "blind box requires a CNY payment method")
 	}
+	orderAmount, limitAmount, bonusAmount := calculateCreateOrderAmounts(req, plan, cfg, methodCurrency)
 	payAmountStr, payAmount, err := calculateCreateOrderPayAmountForOrderType(limitAmount, feeRate, methodCurrency, req.OrderType, cfg.SubscriptionUSDToCNYRate)
 	if err != nil {
 		return nil, err
@@ -107,7 +107,7 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	if oauthResp != nil {
 		return oauthResp, nil
 	}
-	order, err := s.createOrderInTx(ctx, req, user, plan, cfg, orderAmount, limitAmount, feeRate, payAmount, sel)
+	order, err := s.createOrderInTx(ctx, req, user, plan, cfg, orderAmount, limitAmount, feeRate, payAmount, bonusAmount, sel)
 	if err != nil {
 		return nil, err
 	}
@@ -122,31 +122,37 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	return resp, nil
 }
 
-// calculateCreateOrderAmounts freezes credited balance when an order is created.
-// Payment fees and limits continue to use the original recharge amount, while
-// subscription prices never receive balance recharge offers.
-func calculateCreateOrderAmounts(req CreateOrderRequest, plan *dbent.SubscriptionPlan, cfg *PaymentConfig) (orderAmount, limitAmount float64) {
+// calculateCreateOrderAmounts freezes both the credited amount and free portion
+// at creation. Blind boxes reserve their fixed price without a draw or promotion;
+// subscriptions keep the plan price, and balance orders use exactly one offer.
+func calculateCreateOrderAmounts(req CreateOrderRequest, plan *dbent.SubscriptionPlan, cfg *PaymentConfig, currency string) (orderAmount, limitAmount, bonusAmount float64) {
 	if req.RechargeMode == RechargeModeBlindBox {
-		return 0, BlindBoxPrice
+		return 0, BlindBoxPrice, 0
 	}
 	if plan != nil {
-		return plan.Price, plan.Price
+		return plan.Price, plan.Price, 0
 	}
 	if req.OrderType == payment.OrderTypeBalance {
-		return calculateCreditedBalance(req.Amount, cfg.BalanceRechargeMultiplier), req.Amount
+		quote := quoteRechargeBonus(cfg, req.Amount, currency)
+		return quote.Credited, quote.PayBase, quote.Bonus
 	}
-	return req.Amount, req.Amount
+	return req.Amount, req.Amount, 0
 }
 
 func (s *PaymentService) validateOrderInput(ctx context.Context, req CreateOrderRequest, cfg *PaymentConfig) (*dbent.SubscriptionPlan, error) {
 	if err := validateBlindBoxRequest(req, cfg); err != nil {
 		return nil, err
 	}
-	if req.OrderType == payment.OrderTypeBalance && cfg.BalanceDisabled {
-		return nil, infraerrors.Forbidden("BALANCE_PAYMENT_DISABLED", "balance recharge has been disabled")
-	}
-	if req.OrderType == payment.OrderTypeSubscription {
+	// Keep the upstream whitelist: unknown types must not bypass balance pricing.
+	switch req.OrderType {
+	case payment.OrderTypeBalance:
+		if cfg.BalanceDisabled {
+			return nil, infraerrors.Forbidden("BALANCE_PAYMENT_DISABLED", "balance recharge has been disabled")
+		}
+	case payment.OrderTypeSubscription:
 		return s.validateSubOrder(ctx, req)
+	default:
+		return nil, infraerrors.BadRequest("INVALID_ORDER_TYPE", "unsupported order type")
 	}
 	if math.IsNaN(req.Amount) || math.IsInf(req.Amount, 0) || req.Amount <= 0 {
 		return nil, infraerrors.BadRequest("INVALID_AMOUNT", "amount must be a positive number")
@@ -176,7 +182,7 @@ func (s *PaymentService) validateSubOrder(ctx context.Context, req CreateOrderRe
 	return plan, nil
 }
 
-func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderRequest, user *User, plan *dbent.SubscriptionPlan, cfg *PaymentConfig, orderAmount, limitAmount, feeRate, payAmount float64, sel *payment.InstanceSelection) (*dbent.PaymentOrder, error) {
+func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderRequest, user *User, plan *dbent.SubscriptionPlan, cfg *PaymentConfig, orderAmount, limitAmount, feeRate, payAmount, bonusAmount float64, sel *payment.InstanceSelection) (*dbent.PaymentOrder, error) {
 	tx, err := s.entClient.Tx(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
@@ -219,6 +225,7 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 		SetAmount(orderAmount).
 		SetPayAmount(payAmount).
 		SetFeeRate(feeRate).
+		SetBonusAmount(bonusAmount).
 		SetRechargeCode("").
 		SetOutTradeNo(outTradeNo).
 		SetPaymentType(req.PaymentType).
@@ -505,6 +512,7 @@ func (s *PaymentService) invokeProvider(ctx context.Context, order *dbent.Paymen
 	s.writeAuditLog(ctx, order.ID, "ORDER_CREATED", fmt.Sprintf("user:%d", req.UserID), map[string]any{
 		"paymentAmount":  req.Amount,
 		"creditedAmount": order.Amount,
+		"bonusAmount":    order.BonusAmount,
 		"payAmount":      order.PayAmount,
 		"paymentType":    req.PaymentType,
 		"orderType":      req.OrderType,
@@ -778,6 +786,7 @@ func buildCreateOrderResponse(order *dbent.PaymentOrder, req CreateOrderRequest,
 		Amount:       order.Amount,
 		PayAmount:    payAmount,
 		FeeRate:      order.FeeRate,
+		BonusAmount:  order.BonusAmount,
 		Status:       OrderStatusPending,
 		ResultType:   resultType,
 		PaymentType:  req.PaymentType,
