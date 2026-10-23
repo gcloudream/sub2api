@@ -611,6 +611,32 @@ export default {
     }
   },
 
+  // Group accounts (user-facing, read-only)
+  groupAccounts: {
+    title: '账号管理',
+    description: '查看分配给你的专属分组下的账号状态与用量窗口',
+    hint: '仅展示账号名称、状态和用量窗口。刷新会重新查询用量，短时间内重复刷新会返回缓存结果。',
+    refreshAll: '全部刷新',
+    refreshUsage: '刷新用量',
+    empty: '你还没有被分配专属分组',
+    noAccounts: '该分组下暂无账号',
+    noUsage: '暂无用量数据，可点击刷新查询',
+    usageFailed: '用量查询失败，请稍后再试',
+    accountCount: '{count} 个账号',
+    until: '至 {time}',
+    updatedAt: '更新于 {time}',
+    status: {
+      active: '正常',
+      paused: '已暂停',
+      rate_limited: '限流中',
+      overloaded: '过载',
+      temp_unschedulable: '暂时不可用',
+      error: '异常',
+      disabled: '已停用',
+      expired: '已过期'
+    }
+  },
+
   // Available Channels (user-facing)
   availableChannels: {
     title: '可用渠道',

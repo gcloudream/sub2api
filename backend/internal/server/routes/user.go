@@ -39,6 +39,9 @@ func RegisterUserRoutes(
 			user.POST("/auth-identities/bind/start", h.User.StartIdentityBinding)
 			user.GET("/api-keys/:id/usage/daily", panelRateLimiter.Heavy(), h.Usage.GetMyAPIKeyDailyUsage)
 			user.GET("/platform-quotas", h.User.GetMyPlatformQuotas)
+			// 账号管理：只读查看被分配的专属分组下的上游账号（用量查询叠加更严格的按用户限流）
+			user.GET("/group-accounts", h.GroupAccount.List)
+			user.GET("/group-accounts/:id/usage", panelRateLimiter.Heavy(), h.GroupAccount.GetUsage)
 
 			// 通知邮箱管理
 			notifyEmail := user.Group("/notify-email")

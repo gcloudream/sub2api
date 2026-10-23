@@ -287,6 +287,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/group-accounts',
+    name: 'UserGroupAccounts',
+    component: () => import('@/views/user/GroupAccountsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Group Accounts',
+      titleKey: 'groupAccounts.title',
+      descriptionKey: 'groupAccounts.description'
+    }
+  },
+  {
     path: '/profile',
     name: 'Profile',
     component: () => import('@/views/user/ProfileView.vue'),

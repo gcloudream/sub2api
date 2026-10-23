@@ -606,6 +606,32 @@ export default {
     }
   },
 
+  // Group accounts (user-facing, read-only)
+  groupAccounts: {
+    title: 'Group Accounts',
+    description: 'Status and usage windows of accounts in your exclusive groups',
+    hint: 'Only account name, status and usage windows are shown. Refresh re-queries usage; repeated refreshes within a short time return cached results.',
+    refreshAll: 'Refresh all',
+    refreshUsage: 'Refresh usage',
+    empty: 'You have not been assigned any exclusive group',
+    noAccounts: 'No accounts in this group',
+    noUsage: 'No usage data yet, click refresh to query',
+    usageFailed: 'Usage query failed, please try again later',
+    accountCount: '{count} accounts',
+    until: 'until {time}',
+    updatedAt: 'Updated {time}',
+    status: {
+      active: 'Active',
+      paused: 'Paused',
+      rate_limited: 'Rate limited',
+      overloaded: 'Overloaded',
+      temp_unschedulable: 'Temporarily unavailable',
+      error: 'Error',
+      disabled: 'Disabled',
+      expired: 'Expired'
+    }
+  },
+
   // Available Channels (user-facing)
   availableChannels: {
     title: 'Available Channels',

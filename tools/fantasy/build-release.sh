@@ -30,13 +30,14 @@ export GOMAXPROCS=${GOMAXPROCS:-2}
     src/views/user/__tests__/PaymentView.spec.ts src/views/user/__tests__/PaymentResultView.spec.ts \
     src/views/__tests__/UsageDocsView.spec.ts src/utils/__tests__/usageDocs.spec.ts \
     src/utils/__tests__/rechargeBonus.spec.ts src/utils/__tests__/decimalAmount.spec.ts \
-    src/components/layout/__tests__/AppSidebar.spec.ts --maxWorkers=2 --minWorkers=1
+    src/components/layout/__tests__/AppSidebar.spec.ts src/views/user/__tests__/GroupAccountsView.spec.ts \
+    --maxWorkers=2 --minWorkers=1
   pnpm run build
 ) 2>&1 | tee "$output/frontend.log"
 (
   cd backend
   go test -p 2 -tags=unit ./internal/service ./internal/handler ./internal/handler/admin \
-    ./internal/payment/... -run 'Payment|Refund|Recharge|BlindBox|EasyPay|Alipay'
+    ./internal/payment/... -run 'Payment|Refund|Recharge|BlindBox|EasyPay|Alipay|UserGroupAccount'
   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -p 2 -tags embed \
     -ldflags="-s -w -X main.Version=$version -X main.Commit=$commit -X main.Date=$build_date -X main.BuildType=release" \
     -trimpath -o "$output/sub2api" ./cmd/server

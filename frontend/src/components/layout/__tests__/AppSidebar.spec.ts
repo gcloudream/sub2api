@@ -46,6 +46,11 @@ vi.mock('@/composables/useBatchImageAccess', () => ({
   useBatchImageAccess: () => ({ canUseBatchImage: { value: false }, refreshBatchImageAccess: vi.fn() }),
 }))
 
+const groupAccountsAccess = vi.hoisted(() => ({ canViewGroupAccounts: { value: false }, refreshGroupAccountsAccess: vi.fn() }))
+vi.mock('@/composables/useGroupAccountsAccess', () => ({
+  useGroupAccountsAccess: () => groupAccountsAccess,
+}))
+
 vi.mock('vue-router', async (importOriginal) => ({
   ...await importOriginal<typeof import('vue-router')>(),
   useRoute: () => ({ path: '/keys' }),
@@ -113,6 +118,34 @@ describe('AppSidebar usage guide navigation', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('AppSidebar group accounts entry', () => {
+  beforeEach(() => {
+    authStore.isAdmin = false
+    authStore.isSimpleMode = false
+    appStore.sidebarCollapsed = false
+    appStore.backendModeEnabled = false
+    groupAccountsAccess.refreshGroupAccountsAccess.mockClear()
+  })
+
+  it.each([
+    [true, 1],
+    [false, 0],
+  ])('shows the entry only when the user has exclusive groups (%s)', (canView, expected) => {
+    groupAccountsAccess.canViewGroupAccounts.value = canView
+    const wrapper = mount(AppSidebar, {
+      global: { stubs: { RouterLink: RouterLinkStub, Icon: true } },
+    })
+    const links = wrapper.findAllComponents(RouterLinkStub)
+      .filter((link) => link.props('to') === '/group-accounts')
+
+    expect(links).toHaveLength(expected)
+    if (expected) expect(links[0].text()).toBe('nav.groupAccounts')
+    expect(groupAccountsAccess.refreshGroupAccountsAccess).toHaveBeenCalled()
+    wrapper.unmount()
+    groupAccountsAccess.canViewGroupAccounts.value = false
   })
 })
 
