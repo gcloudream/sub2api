@@ -76,9 +76,20 @@
                 <p v-if="usageOf(account.id).usage?.updated_at" class="text-[11px] text-gray-400 dark:text-gray-500">
                   {{ t('groupAccounts.updatedAt', { time: formatDateTimeToMinute(usageOf(account.id).usage?.updated_at) }) }}
                 </p>
+                <p
+                  v-if="usageOf(account.id).error"
+                  class="text-xs text-amber-600 dark:text-amber-400"
+                  data-testid="group-account-usage-error"
+                >
+                  {{ usageOf(account.id).error }}
+                </p>
               </template>
               <p v-else-if="usageOf(account.id).loading" class="text-xs text-gray-400">{{ t('common.loading') }}</p>
-              <p v-else-if="usageOf(account.id).error" class="text-xs text-amber-600 dark:text-amber-400">
+              <p
+                v-else-if="usageOf(account.id).error"
+                class="text-xs text-amber-600 dark:text-amber-400"
+                data-testid="group-account-usage-error"
+              >
                 {{ usageOf(account.id).error }}
               </p>
               <p v-else class="text-xs text-gray-400">{{ t('groupAccounts.noUsage') }}</p>
@@ -200,8 +211,9 @@ async function loadUsage(account: GroupAccount, source: 'passive' | 'active'): P
   state.error = ''
   try {
     state.usage = await groupAccountsAPI.getUsage(account.id, source)
-  } catch (err) {
-    state.error = extractApiErrorMessage(err, t('groupAccounts.usageFailed'))
+  } catch {
+    // 上游错误细节只记在服务端日志；失败时保留上一次的用量数据并提示。
+    state.error = t('groupAccounts.usageFailed')
   } finally {
     state.loading = false
   }

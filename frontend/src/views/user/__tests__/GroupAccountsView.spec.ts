@@ -124,8 +124,26 @@ describe('GroupAccountsView', () => {
 
     const rows = wrapper.findAll('[data-testid="group-account-row"]')
     expect(rows[0].text()).toContain('groupAccounts.noUsage')
-    expect(rows[2].text()).not.toContain('groupAccounts.noUsage')
+    expect(rows[2].get('[data-testid="group-account-usage-error"]').text()).toBe('groupAccounts.usageFailed')
     expect(rows[2].findAll('[data-testid="usage-bar"]')).toHaveLength(0)
+  })
+
+  it('keeps previous usage and shows a localized error when a refresh fails', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    getUsage.mockRejectedValueOnce(new Error('usage query failed, please try again later'))
+    await wrapper.findAll('[data-testid="group-account-refresh"]')[0].trigger('click')
+    await flushPromises()
+
+    const row = wrapper.findAll('[data-testid="group-account-row"]')[0]
+    expect(row.findAll('[data-testid="usage-bar"]').map((b) => b.text())).toEqual(['5h=40', '7d=12'])
+    expect(row.get('[data-testid="group-account-usage-error"]').text()).toBe('groupAccounts.usageFailed')
+
+    getUsage.mockResolvedValueOnce({ five_hour: { utilization: 50, resets_at: null, remaining_seconds: 0 } })
+    await row.get('[data-testid="group-account-refresh"]').trigger('click')
+    await flushPromises()
+    expect(row.find('[data-testid="group-account-usage-error"]').exists()).toBe(false)
   })
 
   it('shows the empty state when no exclusive group is assigned', async () => {
