@@ -202,6 +202,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		requestedReasoningEffort *string
 	}
 	ingressSessionOriginalModel := ""
+	// Populated only by successful HTTP-bridge turns. Native upstream WS keeps
+	// its existing continuation and context-window policy unchanged.
+	var imageContinuation *codexImageWSContinuation
 
 	applyPayloadMutation := func(current []byte, path string, value any) ([]byte, error) {
 		next, err := sjson.SetBytes(current, path, value)
@@ -269,6 +272,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		} else {
 			normalized = next
 		}
+		imageContinuationSource := normalized
 		responsesLite := isOpenAIResponsesLiteWebSocketPayload(normalized)
 		if compatibilityBody, compatibilityChanged, compatibilityErr := normalizeOpenAIResponsesWebSocketCompatibilityBodyWithConfig(s.cfg, normalized, account, responsesLite); compatibilityErr != nil {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", compatibilityErr)
@@ -338,7 +342,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", setErr)
 			}
 		}
-		compatibilityCtx, compatiblePayload, imageCompatibility, compatibilityErr := s.prepareCodexImageGenerationLiteCompatibility(ctx, c, account, compatibilitySource)
+		var restoreErr error
+		compatibilitySource, restoreErr = imageContinuation.restoreMatchedToolOutputInput(compatibilitySource, imageContinuationSource)
+		if restoreErr != nil {
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket image continuation input", restoreErr)
+		}
+		compatibilityCtx, compatiblePayload, imageCompatibility, compatibilityErr := s.prepareCodexImageWSCompatibility(ctx, c, account, compatibilitySource, imageContinuation)
 		if compatibilityErr != nil {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket image request payload", compatibilityErr)
 		}
@@ -773,6 +782,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				turnState = bridgeTurnState
 			}
 			responseID := strings.TrimSpace(result.RequestID)
+			imageContinuation = &codexImageWSContinuation{
+				input: bridgeReplayInput, inputExists: bridgeReplayInputExists,
+				responseID: responseID, responseCalls: result.wsReplayInput,
+				windowID: openAIWSPayloadCodexWindowID(currentBridgePayload.payloadRaw),
+			}
 			if responseID != "" && stateStore != nil {
 				ttl := s.openAIWSResponseStickyTTL()
 				logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, stateStore.BindResponseAccount(ctx, groupID, responseID, account.ID, ttl))

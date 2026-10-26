@@ -489,7 +489,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	// boundary safe for direct bridge callers and preserve a turn-local flag
 	// through request construction, where the inbound handshake may still
 	// advertise Lite for other turns in this websocket session.
-	if !codexImageGenerationLiteCompatibilityEnabled(ctx) {
+	if !codexImageGenerationLiteCompatibilityEnabled(ctx) && !codexImageWSCompatibilityEvaluated(ctx) {
 		var compatibilityErr error
 		ctx, payload, _, compatibilityErr = s.prepareCodexImageGenerationLiteCompatibility(ctx, c, account, payload)
 		if compatibilityErr != nil {
