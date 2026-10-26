@@ -128,13 +128,14 @@ func TestCodexImageWSRejectedChainIsNotReconsideredAfterReplay(t *testing.T) {
 	require.False(t, gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation")`).Exists())
 }
 
-func TestCodexImageWSHTTPBridgeSkillGenerationExportContinuation(t *testing.T) {
+func TestCodexImageWSHTTPBridgeSkillGenerationExportFailureRetriesSameImage(t *testing.T) {
 	completed := func(id, output string) *http.Response {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(fmt.Sprintf("data: {\"type\":\"response.completed\",\"response\":{\"id\":%q,\"status\":\"completed\",\"model\":\"gpt-6.1-sol\",\"output\":%s,\"usage\":{\"input_tokens\":3,\"output_tokens\":2}}}\n\n", id, output)))}
 	}
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{
 		completed("resp_skill", `[{"type":"custom_tool_call","name":"exec","call_id":"call_skill","input":"read skill"}]`),
-		completed("resp_image_export", `[{"id":"ig_boat","type":"image_generation_call","status":"completed","result":"aW1hZ2U=","size":"1024x1024"},{"type":"custom_tool_call","name":"exec","call_id":"call_export","input":"save image"}]`),
+		completed("resp_image_export", `[{"id":"ig_boat","type":"image_generation_call","status":"completed","result":"aW1hZ2U=","size":"1024x1024"},{"type":"custom_tool_call","name":"exec","call_id":"call_export","input":"python export.py"}]`),
+		completed("resp_export_retry", `[{"type":"custom_tool_call","name":"exec","call_id":"call_export_retry","input":"python3 export.py"}]`),
 		completed("resp_final", `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Saved image."}]}]`),
 		completed("resp_text_tool", `[{"type":"custom_tool_call","name":"exec","call_id":"call_text","input":"read text"}]`),
 		completed("resp_text_final", `[]`),
@@ -150,7 +151,7 @@ func TestCodexImageWSHTTPBridgeSkillGenerationExportContinuation(t *testing.T) {
 		Credentials: map[string]any{"access_token": "test-token"},
 		Extra:       map[string]any{"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge, "codex_image_generation_bridge": true},
 	}
-	after := make(chan *OpenAIForwardResult, 5)
+	after := make(chan *OpenAIForwardResult, 6)
 	errCh := make(chan error, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := coderws.Accept(w, r, nil)
@@ -180,11 +181,13 @@ func TestCodexImageWSHTTPBridgeSkillGenerationExportContinuation(t *testing.T) {
 		`"input":[{"type":"additional_tools","role":"developer","tools":[{"type":"custom","name":"exec"}]},{"type":"message","role":"user","content":"Generate an image of a folded paper boat."}]`,
 		`"previous_response_id":"resp_skill","input":[{"type":"custom_tool_call_output","call_id":"call_skill","output":"skill read"}]`,
 		// No response anchor: only the matching call output proves continuation.
-		`"input":[{"type":"custom_tool_call_output","call_id":"call_export","output":"/workspace/output/images/boat.png"}]`,
+		`"input":[{"type":"custom_tool_call_output","call_id":"call_export","output":"Process exited with code 127: python: command not found"}]`,
+		`"previous_response_id":"resp_export_retry","input":[{"type":"custom_tool_call_output","call_id":"call_export_retry","output":"/workspace/output/images/boat.png"}]`,
 		`"previous_response_id":"resp_final","input":[{"type":"message","role":"user","content":"Explain the result in a sentence."}]`,
 		`"previous_response_id":"resp_text_tool","input":[{"type":"custom_tool_call_output","call_id":"call_text","output":"text read"}]`,
 	}
-	ids := []string{"resp_skill", "resp_image_export", "resp_final", "resp_text_tool", "resp_text_final"}
+	ids := []string{"resp_skill", "resp_image_export", "resp_export_retry", "resp_final", "resp_text_tool", "resp_text_final"}
+	generatedImages := 0
 	for i, frame := range frames {
 		payload := `{"type":"response.create","model":"gpt-6.1-sol","client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true"},` + frame + `}`
 		require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(payload)))
@@ -193,14 +196,18 @@ func TestCodexImageWSHTTPBridgeSkillGenerationExportContinuation(t *testing.T) {
 		require.Equal(t, ids[i], gjson.GetBytes(message, "response.id").String())
 		result := <-after
 		require.NotNil(t, result)
+		generatedImages += result.ImageCount
 		if i == 1 {
 			require.Equal(t, 1, result.ImageCount)
-			require.Len(t, result.wsReplayInput, 1)
-			require.Equal(t, "call_export", gjson.GetBytes(result.wsReplayInput[0], "call_id").String())
+			require.Len(t, result.wsReplayInput, 2)
+			require.Equal(t, "ig_boat", gjson.GetBytes(result.wsReplayInput[0], "id").String())
+			require.Equal(t, "call_export", gjson.GetBytes(result.wsReplayInput[1], "call_id").String())
+		} else {
+			require.Zero(t, result.ImageCount, "replaying an existing input image must not bill another generated image")
 		}
 		require.Len(t, upstream.requests, i+1)
 		body := upstream.bodies[i]
-		if i < 3 {
+		if i < 4 {
 			require.Empty(t, upstream.requests[i].Header.Get(responsesLiteHeader))
 			require.True(t, gjson.GetBytes(body, `tools.#(type=="image_generation")`).Exists())
 			require.Contains(t, gjson.GetBytes(body, "instructions").String(), "<sub2api-codex-image-delivery>")
@@ -209,7 +216,13 @@ func TestCodexImageWSHTTPBridgeSkillGenerationExportContinuation(t *testing.T) {
 			require.False(t, gjson.GetBytes(body, `tools.#(type=="image_generation")`).Exists())
 			require.NotContains(t, gjson.GetBytes(body, "instructions").String(), "<sub2api-codex-image-delivery>")
 		}
+		if i >= 2 {
+			images := gjson.GetBytes(body, `input.#(type=="image_generation_call")#`).Array()
+			require.Len(t, images, 1, "export retries keep exactly the original hosted result in the model's input")
+			require.JSONEq(t, `{"id":"ig_boat","type":"image_generation_call","status":"completed","result":"aW1hZ2U=","size":"1024x1024"}`, images[0].Raw)
+		}
 	}
+	require.Equal(t, 1, generatedImages, "the mock chain contains one generation followed only by export retries")
 	require.NoError(t, client.Close(coderws.StatusNormalClosure, "done"))
 	require.NoError(t, <-errCh)
 }

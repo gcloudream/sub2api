@@ -299,7 +299,7 @@ type openAIWSToolCallReplayCollector struct {
 	items    []json.RawMessage
 	seen     map[string]struct{}
 	allItems []json.RawMessage
-	allSeen  map[string]struct{}
+	allSeen  map[string]int
 }
 
 func (c *openAIWSToolCallReplayCollector) AddEvent(eventType string, message []byte) {
@@ -330,6 +330,27 @@ func (c *openAIWSToolCallReplayCollector) AllItems() []json.RawMessage {
 	return slices.Clone(c.allItems)
 }
 
+// HTTP bridges reconstruct the next Responses input instead of retaining
+// upstream response state. Keep completed hosted image results alongside tool
+// calls so a failed local export does not hide the image already generated.
+// Native upstream WS still uses Items and its existing continuation contract.
+func (c *openAIWSToolCallReplayCollector) HTTPBridgeItems() []json.RawMessage {
+	var items []json.RawMessage
+	for _, item := range c.allItems {
+		parsed := gjson.ParseBytes(item)
+		if isCodexToolCallContextItemType(parsed.Get("type").String()) || completedOpenAIWSHostedImageReplayItem(parsed) {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func completedOpenAIWSHostedImageReplayItem(item gjson.Result) bool {
+	return strings.TrimSpace(item.Get("type").String()) == "image_generation_call" &&
+		strings.TrimSpace(item.Get("status").String()) == "completed" &&
+		item.Get("result").Type == gjson.String && item.Get("result").String() != ""
+}
+
 func (c *openAIWSToolCallReplayCollector) addAllItem(item gjson.Result) {
 	if !item.Exists() || item.Type != gjson.JSON {
 		return
@@ -346,12 +367,19 @@ func (c *openAIWSToolCallReplayCollector) addAllItem(item gjson.Result) {
 		key = raw
 	}
 	if c.allSeen == nil {
-		c.allSeen = make(map[string]struct{})
+		c.allSeen = make(map[string]int)
 	}
-	if _, ok := c.allSeen[key]; ok {
+	if index, ok := c.allSeen[key]; ok {
+		// Some providers finish the image only in response.completed after an
+		// earlier output_item.done without bytes. Retain the complete version.
+		previous := gjson.ParseBytes(c.allItems[index])
+		if strings.TrimSpace(previous.Get("type").String()) == "image_generation_call" &&
+			completedOpenAIWSHostedImageReplayItem(item) && !completedOpenAIWSHostedImageReplayItem(previous) {
+			c.allItems[index] = json.RawMessage(raw)
+		}
 		return
 	}
-	c.allSeen[key] = struct{}{}
+	c.allSeen[key] = len(c.allItems)
 	c.allItems = append(c.allItems, json.RawMessage(raw))
 }
 
@@ -738,7 +766,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			Duration:                      time.Since(turnStart),
 			FirstTokenMs:                  firstTokenMs,
 		}
-		if replayInput := replayCollector.Items(); len(replayInput) > 0 {
+		if replayInput := replayCollector.HTTPBridgeItems(); len(replayInput) > 0 {
 			result.wsReplayInput = replayInput
 			result.wsReplayInputExists = true
 		}
