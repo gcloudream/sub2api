@@ -389,6 +389,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				bridgeModified = true
 				logOpenAIWSModeInfo("ingress_ws_codex_image_bridge_instructions_added account_id=%d", account.ID)
 			}
+			if applyCodexImageDeliveryInstructions(payloadMap) {
+				bridgeModified = true
+				logOpenAIWSModeInfo("ingress_ws_codex_image_delivery_instructions_added account_id=%d", account.ID)
+			}
 			if bridgeModified {
 				rebuilt, marshalErr := json.Marshal(payloadMap)
 				if marshalErr != nil {

@@ -875,11 +875,13 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 	require.False(t, gjson.Get(functionPayload, `tools.#(type=="image_generation")`).Exists())
 	require.False(t, gjson.Get(functionPayload, "tool_choice").Exists())
 	require.NotContains(t, gjson.Get(functionPayload, "instructions").String(), codexImageGenerationBridgeMarker)
+	require.NotContains(t, gjson.Get(functionPayload, "instructions").String(), codexImageDeliveryMarker)
 
 	imagePayload := requestToJSONString(captureConn.writes[3])
 	require.Equal(t, "gpt-5.5", gjson.Get(imagePayload, "model").String(), "image compatibility must use the inherited session model")
 	require.True(t, gjson.Get(imagePayload, `tools.#(type=="image_generation")`).Exists())
 	require.Contains(t, gjson.Get(imagePayload, "instructions").String(), codexImageGenerationBridgeMarker)
+	require.Contains(t, gjson.Get(imagePayload, "instructions").String(), codexImageDeliveryMarker)
 	require.False(t, isOpenAIResponsesLiteWebSocketPayload([]byte(imagePayload)))
 	require.True(t, gjson.Get(imagePayload, "parallel_tool_calls").Bool(), "standard Responses must avoid Lite-only normalization")
 	// Existing strict replay drops previous_response_id when tool/instruction
@@ -890,6 +892,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 	require.True(t, isOpenAIResponsesLiteWebSocketPayload([]byte(textAfterImage)))
 	require.False(t, gjson.Get(textAfterImage, `tools.#(type=="image_generation")`).Exists())
 	require.NotContains(t, gjson.Get(textAfterImage, "instructions").String(), codexImageGenerationBridgeMarker)
+	require.NotContains(t, gjson.Get(textAfterImage, "instructions").String(), codexImageDeliveryMarker)
 	require.False(t, gjson.Get(textAfterImage, "parallel_tool_calls").Bool())
 	require.False(t, gjson.Get(textAfterImage, "previous_response_id").Exists())
 }
