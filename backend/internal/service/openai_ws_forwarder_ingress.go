@@ -715,7 +715,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				return errOpenAIWSSessionPreempted
 			}
 			if hooks != nil && hooks.AfterTurn != nil {
-				hooks.AfterTurn(turn, result, bridgeErr)
+				billingResult := result
+				if isOpenAIWSHTTPBridgePrewarm(currentBridgePayload.payloadRaw) {
+					// A local prewarm ACK still releases this turn's slots, but
+					// must never enter token or per-request billing, even on a
+					// downstream write error. Keep its result only for replay.
+					billingResult = nil
+				}
+				hooks.AfterTurn(turn, billingResult, bridgeErr)
 			}
 			if bridgeErr != nil {
 				var failoverErr *UpstreamFailoverError

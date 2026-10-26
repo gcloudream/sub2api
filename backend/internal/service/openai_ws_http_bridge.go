@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 )
 
@@ -250,12 +251,48 @@ func prepareOpenAIWSHTTPBridgeBody(account *Account, payload []byte) ([]byte, er
 	if body == nil {
 		return nil, errors.New("response.create payload must be a JSON object")
 	}
+	if generate, ok := body["generate"].(bool); ok && !generate {
+		return nil, errors.New("generate=false prewarm must be acknowledged locally")
+	}
 	delete(body, "type")
 	delete(body, "generate")
 	delete(body, "previous_response_id")
 	deleteOpenAIResponsesNoneReasoningEffortFromObject(account, body)
 	body["stream"] = true
 	return json.Marshal(body)
+}
+
+func isOpenAIWSHTTPBridgePrewarm(payload []byte) bool {
+	return gjson.GetBytes(payload, "generate").Type == gjson.False
+}
+
+// A client generate=false frame establishes local conversation context, not a
+// model turn. This bridge normally drops the WS generate field, which would
+// turn false into a real, billable generation. The local response ID can be
+// chained on this websocket; ingress keeps its input in per-connection replay.
+func acknowledgeOpenAIWSHTTPBridgePrewarm(originalModel string, writeClientMessage func([]byte) error) (*OpenAIForwardResult, error) {
+	responseID := "resp_sub2api_prewarm_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	response := map[string]any{
+		"id": responseID, "object": "response", "created_at": time.Now().Unix(),
+		"model": originalModel, "status": "in_progress", "output": []any{},
+	}
+	for index, eventType := range []string{"response.created", "response.completed"} {
+		if eventType == "response.completed" {
+			response["status"] = "completed"
+			response["usage"] = map[string]int{"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+		}
+		message, err := json.Marshal(map[string]any{"type": eventType, "sequence_number": index, "response": response})
+		if err != nil {
+			return nil, fmt.Errorf("encode local websocket prewarm acknowledgement: %w", err)
+		}
+		if err := writeClientMessage(message); err != nil {
+			return nil, fmt.Errorf("write local websocket prewarm acknowledgement: %w", err)
+		}
+	}
+	return &OpenAIForwardResult{
+		RequestID: responseID, Model: originalModel, Stream: true,
+		OpenAIWSMode: true, UpstreamTerminalEvent: "response.completed",
+	}, nil
 }
 
 type openAIWSToolCallReplayCollector struct {
@@ -434,14 +471,17 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if s == nil {
 		return nil, errors.New("service is nil")
 	}
-	if s.httpUpstream == nil {
-		return nil, errors.New("openai http upstream is nil")
-	}
 	if account == nil {
 		return nil, errors.New("account is nil")
 	}
 	if writeClientMessage == nil {
 		return nil, errors.New("client websocket writer is nil")
+	}
+	if isOpenAIWSHTTPBridgePrewarm(payload) {
+		return acknowledgeOpenAIWSHTTPBridgePrewarm(originalModel, writeClientMessage)
+	}
+	if s.httpUpstream == nil {
+		return nil, errors.New("openai http upstream is nil")
 	}
 	responseModelObserver := &upstreamResponseModelObserver{}
 
