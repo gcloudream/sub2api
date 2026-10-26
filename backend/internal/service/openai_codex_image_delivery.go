@@ -1,6 +1,9 @@
 package service
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 const codexImageDeliveryMarker = "<sub2api-codex-image-delivery>"
 
@@ -24,6 +27,13 @@ const codexImageDeliveryInstructions = codexImageDeliveryMarker + "\n" + codexIm
 // applyCodexImageDeliveryInstructions is called only inside the caller's
 // authorized Codex bridge gate. It describes actual client-side file operations;
 // it does not manufacture local tools, saved paths or completion events.
+//
+// Codex advertises hosted image_generation on every turn, so the tool alone is
+// not an image turn. Only a latest user request that asks for an image, or a
+// continuation after this turn's image_generation_call, receives the guidance.
+// It is appended as a trailing developer message: instructions, tools and the
+// earlier history stay byte-identical, so the upstream prompt-cache prefix
+// survives entering and leaving an image turn.
 func applyCodexImageDeliveryInstructions(reqBody map[string]any) bool {
 	if len(reqBody) == 0 ||
 		isCodexSparkModel(firstNonEmptyString(reqBody["model"])) ||
@@ -31,19 +41,120 @@ func applyCodexImageDeliveryInstructions(reqBody map[string]any) bool {
 		codexImageDeliveryDeclaresLocalTool(reqBody) {
 		return false
 	}
-	existing, isString := reqBody["instructions"].(string)
-	if raw, exists := reqBody["instructions"]; exists && raw != nil && !isString {
+	if existing, _ := reqBody["instructions"].(string); strings.Contains(existing, codexImageDeliveryMarker) {
 		return false
 	}
-	if strings.Contains(existing, codexImageDeliveryMarker) {
+	var input []any
+	switch raw := reqBody["input"].(type) {
+	case []any:
+		input = raw
+	case string:
+		input = []any{map[string]any{"role": "user", "content": raw}}
+	default:
 		return false
 	}
-	if existing == "" {
-		reqBody["instructions"] = codexImageDeliveryInstructions
-	} else {
-		reqBody["instructions"] = existing + "\n\n" + codexImageDeliveryInstructions
+	if !codexImageDeliveryTurnRequested(reqBody, input) {
+		return false
 	}
+	reqBody["input"] = append(input, map[string]any{
+		"type": "message",
+		"role": "developer",
+		"content": []any{
+			map[string]any{"type": "input_text", "text": codexImageDeliveryInstructions},
+		},
+	})
 	return true
+}
+
+func codexImageDeliveryTurnRequested(reqBody map[string]any, input []any) bool {
+	latestUser := -1
+	for i := len(input) - 1; i >= 0; i-- {
+		if codexImageDeliveryUserMessage(input[i]) {
+			latestUser = i
+			break
+		}
+	}
+	// A delta without a user item continues a turn whose earlier frame already
+	// carried any delivery guidance in upstream or bridge replay history.
+	if latestUser < 0 {
+		return false
+	}
+	for _, raw := range input[latestUser+1:] {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if strings.Contains(extractTextFromContent(item["content"]), codexImageDeliveryMarker) {
+			return false
+		}
+		if strings.TrimSpace(firstNonEmptyString(item["type"])) == "image_generation_call" {
+			return true
+		}
+	}
+	if choice, ok := reqBody["tool_choice"].(map[string]any); ok &&
+		strings.TrimSpace(firstNonEmptyString(choice["type"])) == "image_generation" {
+		return true
+	}
+	text, hasImage := codexImageDeliveryUserText(input[latestUser])
+	return codexImageDeliveryRequestHint(text, hasImage)
+}
+
+func codexImageDeliveryUserMessage(raw any) bool {
+	item, ok := raw.(map[string]any)
+	if !ok || strings.TrimSpace(firstNonEmptyString(item["role"])) != "user" {
+		return false
+	}
+	kind := strings.TrimSpace(firstNonEmptyString(item["type"]))
+	return kind == "" || kind == "message"
+}
+
+func codexImageDeliveryUserText(raw any) (string, bool) {
+	item, _ := raw.(map[string]any)
+	if text, ok := item["content"].(string); ok {
+		return text, false
+	}
+	parts, _ := item["content"].([]any)
+	var texts []string
+	hasImage := false
+	for _, rawPart := range parts {
+		part, ok := rawPart.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch strings.TrimSpace(firstNonEmptyString(part["type"])) {
+		case "input_text", "text":
+			if text, ok := part["text"].(string); ok {
+				texts = append(texts, text)
+			}
+		case "input_image", "image_url":
+			hasImage = true
+		}
+	}
+	return strings.Join(texts, "\n"), hasImage
+}
+
+// A false positive costs one conditional developer message on that turn; a
+// miss loses automatic delivery. The hint is therefore broader than the Lite
+// upgrade classifier, which must not change a text turn's protocol.
+var (
+	codexImageDeliveryChineseHint = regexp.MustCompile(`生图|[Pp]图|出图|文生图|图生图|来一?张|画(一|个|张|幅|只|条|头|匹|下|出|成|些|几)|(生成|绘制|画|制作|做|创作|设计|渲染|配|修改|编辑|重绘|美化|修图)[^\n]{0,24}(图|照片|插画|海报|壁纸|头像|图标|logo|Logo|LOGO|封面|表情包|漫画|立绘|原画|肖像)`)
+	codexImageDeliveryEnglishHint = regexp.MustCompile(`(?i)\b(generate|create|make|draw|paint|render|design|illustrate|produce|sketch|edit|redraw|retouch|upscale)\b[^\n]{0,60}\b(images?|pictures?|photos?|illustrations?|posters?|wallpapers?|icons?|logos?|portraits?|artworks?|drawings?|paintings?|stickers?|avatars?|banners?)\b|^\s*(please\s+)?((can|could|would)\s+you\s+)?(draw|paint|sketch|illustrate)\b`)
+)
+
+const codexImageDeliveryHintScanLimit = 64 * 1024
+
+func codexImageDeliveryRequestHint(text string, hasImage bool) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	if strings.Contains(text, "$imagegen") || codexImageLiteHasDirectImageRequest(text, hasImage) {
+		return true
+	}
+	if len(text) > codexImageDeliveryHintScanLimit {
+		text = text[:codexImageDeliveryHintScanLimit]
+	}
+	return codexImageDeliveryChineseHint.MatchString(text) || codexImageDeliveryEnglishHint.MatchString(text)
 }
 
 func codexImageDeliveryDeclaresLocalTool(reqBody map[string]any) bool {

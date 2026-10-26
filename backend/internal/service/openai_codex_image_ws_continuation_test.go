@@ -210,12 +210,14 @@ func TestCodexImageWSHTTPBridgeSkillGenerationExportFailureRetriesSameImage(t *t
 		if i < 4 {
 			require.Empty(t, upstream.requests[i].Header.Get(responsesLiteHeader))
 			require.True(t, gjson.GetBytes(body, `tools.#(type=="image_generation")`).Exists())
-			require.Contains(t, gjson.GetBytes(body, "instructions").String(), "<sub2api-codex-image-delivery>")
 		} else {
 			require.Equal(t, "true", upstream.requests[i].Header.Get(responsesLiteHeader))
 			require.False(t, gjson.GetBytes(body, `tools.#(type=="image_generation")`).Exists())
-			require.NotContains(t, gjson.GetBytes(body, "instructions").String(), "<sub2api-codex-image-delivery>")
 		}
+		// The image request frame carries the only delivery message; tool deltas
+		// and later text turns see it once through bridge replay history.
+		require.Equal(t, 1, codexImageDeliveryInputMarkers(t, body))
+		require.Equal(t, i == 0, codexImageDeliveryInputEndsWithMarker(body))
 		if i >= 2 {
 			images := gjson.GetBytes(body, `input.#(type=="image_generation_call")#`).Array()
 			require.Len(t, images, 1, "export retries keep exactly the original hosted result in the model's input")
