@@ -189,6 +189,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 	type openAIWSClientPayload struct {
 		payloadRaw               []byte
+		compatibilityCtx         context.Context
 		accountIdentitySourceRaw []byte
 		rawForHash               []byte
 		promptCacheKey           string
@@ -326,6 +327,24 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		if accountScoped {
 			normalized = accountScopedPayload
+		}
+		// Keep the compatibility decision turn-local. A later text turn on the
+		// same socket must retain its own Lite marker and tool contract.
+		compatibilitySource := normalized
+		if modelMissing {
+			var setErr error
+			compatibilitySource, setErr = applyPayloadMutation(compatibilitySource, "model", originalModel)
+			if setErr != nil {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", setErr)
+			}
+		}
+		compatibilityCtx, compatiblePayload, imageCompatibility, compatibilityErr := s.prepareCodexImageGenerationLiteCompatibility(ctx, c, account, compatibilitySource)
+		if compatibilityErr != nil {
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket image request payload", compatibilityErr)
+		}
+		if imageCompatibility {
+			normalized = compatiblePayload
+			responsesLite = false
 		}
 		if responsesLite {
 			litePayload, _, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(normalized, account)
@@ -470,6 +489,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 		return openAIWSClientPayload{
 			payloadRaw:               normalized,
+			compatibilityCtx:         compatibilityCtx,
 			accountIdentitySourceRaw: accountIdentitySourceRaw,
 			rawForHash:               trimmed,
 			promptCacheKey:           promptCacheKey,
@@ -677,7 +697,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 			}
 			result, bridgeErr := s.proxyOpenAIWSHTTPBridgeTurn(
-				ctx,
+				currentBridgePayload.compatibilityCtx,
 				c,
 				account,
 				token,
@@ -787,6 +807,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	)
 	if buildHdrErr != nil {
 		return fmt.Errorf("build ws headers: %w", buildHdrErr)
+	}
+	if codexImageGenerationLiteCompatibilityEnabled(firstPayload.compatibilityCtx) {
+		wsHeaders.Del(responsesLiteHeader)
 	}
 	baseAcquireReq := openAIWSAcquireRequest{
 		Account: account,
@@ -1933,6 +1956,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if updHdrErr != nil {
 				logOpenAIWSModeInfo("ingress_ws_update_headers_failed account_id=%d err=%v", account.ID, updHdrErr)
 			} else {
+				if codexImageGenerationLiteCompatibilityEnabled(nextPayload.compatibilityCtx) {
+					updatedHeaders.Del(responsesLiteHeader)
+				}
 				baseAcquireReq.Headers = updatedHeaders
 			}
 		}

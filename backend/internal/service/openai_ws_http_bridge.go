@@ -445,6 +445,17 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	}
 	responseModelObserver := &upstreamResponseModelObserver{}
 
+	// Ingress normally prepares each frame before arriving here. Keep this
+	// boundary safe for direct bridge callers and preserve a turn-local flag
+	// through request construction, where the inbound handshake may still
+	// advertise Lite for other turns in this websocket session.
+	if !codexImageGenerationLiteCompatibilityEnabled(ctx) {
+		var compatibilityErr error
+		ctx, payload, _, compatibilityErr = s.prepareCodexImageGenerationLiteCompatibility(ctx, c, account, payload)
+		if compatibilityErr != nil {
+			return nil, fmt.Errorf("prepare websocket image compatibility: %w", compatibilityErr)
+		}
+	}
 	body, err := prepareOpenAIWSHTTPBridgeBody(account, payload)
 	if err != nil {
 		return nil, fmt.Errorf("prepare http bridge body: %w", err)
@@ -489,7 +500,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			LoweredTools:  loweredTools,
 		})
 	}
-	if account.Platform != PlatformGrok && isOpenAIResponsesLiteWebSocketPayload(payload) {
+	if account.Platform != PlatformGrok && !codexImageGenerationLiteCompatibilityEnabled(ctx) && isOpenAIResponsesLiteWebSocketPayload(payload) {
 		liteBody, liteChanged, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(body, account)
 		if liteErr != nil {
 			return nil, fmt.Errorf("normalize responses Lite payload: %w", liteErr)
@@ -512,10 +523,13 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if buildErr != nil {
 			return nil, buildErr
 		}
-		if account.Platform != PlatformGrok && isOpenAIResponsesLiteWebSocketPayload(payload) {
+		if account.Platform != PlatformGrok && !codexImageGenerationLiteCompatibilityEnabled(ctx) && isOpenAIResponsesLiteWebSocketPayload(payload) {
 			upstreamReq.Header.Set(responsesLiteHeader, "true")
 		}
 		if err := applyMappedGPT55LiteCompatibility(upstreamReq, account, requestBody); err != nil {
+			return nil, err
+		}
+		if err := applyCodexImageGenerationLiteCompatibility(upstreamReq); err != nil {
 			return nil, err
 		}
 		return upstreamReq, nil

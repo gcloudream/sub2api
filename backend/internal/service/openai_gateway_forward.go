@@ -89,7 +89,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			body = reasoningBody
 		}
 	}
-	responsesLite := account.IsOpenAI() && isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader))
+	// A Codex client can keep its default Lite catalog. Upgrade only an
+	// explicitly requested image turn on an eligible account; the original
+	// ingress headers remain untouched so failover can choose another route.
+	ctx, body, codexImageLiteCompatibility, err := s.prepareCodexImageGenerationLiteCompatibility(ctx, c, account, body)
+	if err != nil {
+		return nil, err
+	}
+	responsesLite := account.IsOpenAI() && isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) && !codexImageLiteCompatibility
 	if responsesLite {
 		liteBody, changed, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(body, account)
 		if liteErr != nil {
@@ -345,7 +352,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		imageGenerationAllowed = GroupAllowsImageGeneration(apiKey.Group)
 	}
 	codexImageGenerationBridgeEnabled := isCodexCLI &&
-		!isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) &&
+		(!isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) || codexImageLiteCompatibility) &&
 		imageGenerationAllowed &&
 		codexImageGenerationExplicitToolPolicy != codexImageGenerationExplicitToolPolicyStrip &&
 		s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey)
@@ -1527,6 +1534,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http", req.Header, body, "not_applicable")
 
 	if err := applyMappedGPT55LiteCompatibility(req, account, body); err != nil {
+		return nil, err
+	}
+	if err := applyCodexImageGenerationLiteCompatibility(req); err != nil {
 		return nil, err
 	}
 	return req, nil

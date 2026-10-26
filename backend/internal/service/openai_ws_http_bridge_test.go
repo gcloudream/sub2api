@@ -31,6 +31,45 @@ func TestResolveOpenAIWSClientFirstMessageTimeout(t *testing.T) {
 	require.Equal(t, 120*time.Second, ResolveOpenAIWSClientFirstMessageTimeout(cfg))
 }
 
+func TestProxyOpenAIWSHTTPBridgeTurn_ImageCompatibilityIsTurnLocal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tt := range []struct {
+		name       string
+		input      string
+		wantHeader string
+		wantImage  bool
+	}{
+		{name: "promoted image must not regain handshake Lite header", input: "Generate an image of an orange cat.", wantImage: true},
+		{name: "ordinary text preserves Lite after an image turn", input: "Explain the previous result in one sentence.", wantHeader: "true"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": {"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_image_compat\",\"model\":\"gpt-6.1-sol\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n")),
+			}}
+			svc := newOpenAIImageGenerationControlTestService(upstream)
+			c, _ := newOpenAIImageGenerationControlTestContext(true, "codex_cli_rs/0.160.0")
+			c.Request.Header.Set(responsesLiteHeader, "true")
+			account := &Account{ID: 5151, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"codex_image_generation_bridge": true}, Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "test-account"}}
+			payload := []byte(fmt.Sprintf(`{"type":"response.create","model":"gpt-6.1-sol","stream":true,"input":%q,"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true"}}`, tt.input))
+			// Match normal WS ingress: decide once using the original frame,
+			// then pass its context and already-cleaned payload to the bridge.
+			turnCtx, normalized, promoted, err := svc.prepareCodexImageGenerationLiteCompatibility(context.Background(), c, account, payload)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantImage, promoted)
+			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(turnCtx, c, account, "test-token", normalized, len(normalized), "gpt-6.1-sol", "", "", "", "", 1, func([]byte) error { return nil })
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.NotNil(t, upstream.lastReq)
+			require.Equal(t, tt.wantHeader, upstream.lastReq.Header.Get(responsesLiteHeader))
+			require.Equal(t, !tt.wantImage, isOpenAIResponsesLiteWebSocketPayload(upstream.lastBody))
+			require.Equal(t, "true", c.GetHeader(responsesLiteHeader), "compatibility must not mutate the session's incoming handshake")
+			require.True(t, isOpenAIResponsesLiteWebSocketPayload(payload), "compatibility must not mutate the client frame")
+		})
+	}
+}
+
 func TestPrepareOpenAIWSHTTPBridgeBodyStripsWSFields(t *testing.T) {
 	body, err := prepareOpenAIWSHTTPBridgeBody(nil, []byte(`{"type":"response.create","generate":true,"model":"gpt-5","stream":false,"previous_response_id":"resp_prev","input":"hi","sequence":900719925474099312345}`))
 	require.NoError(t, err)

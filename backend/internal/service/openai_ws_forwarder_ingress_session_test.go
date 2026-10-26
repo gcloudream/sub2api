@@ -644,6 +644,8 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 			[]byte(`{"type":"response.completed","response":{"id":"resp_codex_image_bridge","model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}}`),
 			[]byte(`{"type":"response.completed","response":{"id":"resp_codex_image_lite","model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}}`),
 			[]byte(`{"type":"response.completed","response":{"id":"resp_codex_image_function","model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}}`),
+			[]byte(`{"type":"response.completed","response":{"id":"resp_codex_lite_image_upgrade","model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}}`),
+			[]byte(`{"type":"response.completed","response":{"id":"resp_codex_lite_text_after_image","model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}}`),
 		},
 	}
 	captureDialer := &openAIWSCaptureDialer{conn: captureConn}
@@ -788,6 +790,41 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 	require.Equal(t, coderws.MessageText, msgType)
 	require.Equal(t, "resp_codex_image_function", gjson.GetBytes(message, "response.id").String())
 
+	// The same upstream socket can carry a Lite text/tool turn, a promoted
+	// image turn, and another ordinary Lite turn without leaking the promotion.
+	writeCtx, cancelWrite = context.WithTimeout(context.Background(), 3*time.Second)
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{
+		"type":"response.create",
+		"stream":false,
+		"previous_response_id":"resp_codex_image_function",
+		"parallel_tool_calls":true,
+		"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true"},
+		"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"Generate an image of a small orange cat."}]}]
+	}`))
+	cancelWrite()
+	require.NoError(t, err)
+	readCtx, cancelRead = context.WithTimeout(context.Background(), 3*time.Second)
+	_, message, err = clientConn.Read(readCtx)
+	cancelRead()
+	require.NoError(t, err)
+	require.Equal(t, "resp_codex_lite_image_upgrade", gjson.GetBytes(message, "response.id").String())
+
+	writeCtx, cancelWrite = context.WithTimeout(context.Background(), 3*time.Second)
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{
+		"type":"response.create","model":"gpt-5.5","stream":false,
+		"previous_response_id":"resp_codex_lite_image_upgrade",
+		"parallel_tool_calls":true,
+		"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true"},
+		"input":"Explain the previous result in one sentence."
+	}`))
+	cancelWrite()
+	require.NoError(t, err)
+	readCtx, cancelRead = context.WithTimeout(context.Background(), 3*time.Second)
+	_, message, err = clientConn.Read(readCtx)
+	cancelRead()
+	require.NoError(t, err)
+	require.Equal(t, "resp_codex_lite_text_after_image", gjson.GetBytes(message, "response.id").String())
+
 	writeCtx, cancelWrite = context.WithTimeout(context.Background(), 3*time.Second)
 	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{
 		"type":"response.create",
@@ -809,7 +846,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 		t.Fatal("等待 ingress websocket 结束超时")
 	}
 
-	require.Len(t, captureConn.writes, 3)
+	require.Len(t, captureConn.writes, 5)
 	nonLitePayload := requestToJSONString(captureConn.writes[0])
 	require.True(t, gjson.Get(nonLitePayload, `tools.#(type=="image_generation")`).Exists())
 	require.Equal(t, "png", gjson.Get(nonLitePayload, `tools.#(type=="image_generation").output_format`).String())
@@ -838,6 +875,23 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 	require.False(t, gjson.Get(functionPayload, `tools.#(type=="image_generation")`).Exists())
 	require.False(t, gjson.Get(functionPayload, "tool_choice").Exists())
 	require.NotContains(t, gjson.Get(functionPayload, "instructions").String(), codexImageGenerationBridgeMarker)
+
+	imagePayload := requestToJSONString(captureConn.writes[3])
+	require.Equal(t, "gpt-5.5", gjson.Get(imagePayload, "model").String(), "image compatibility must use the inherited session model")
+	require.True(t, gjson.Get(imagePayload, `tools.#(type=="image_generation")`).Exists())
+	require.Contains(t, gjson.Get(imagePayload, "instructions").String(), codexImageGenerationBridgeMarker)
+	require.False(t, isOpenAIResponsesLiteWebSocketPayload([]byte(imagePayload)))
+	require.True(t, gjson.Get(imagePayload, "parallel_tool_calls").Bool(), "standard Responses must avoid Lite-only normalization")
+	// Existing strict replay drops previous_response_id when tool/instruction
+	// declarations change; the promotion must preserve that policy.
+	require.False(t, gjson.Get(imagePayload, "previous_response_id").Exists())
+
+	textAfterImage := requestToJSONString(captureConn.writes[4])
+	require.True(t, isOpenAIResponsesLiteWebSocketPayload([]byte(textAfterImage)))
+	require.False(t, gjson.Get(textAfterImage, `tools.#(type=="image_generation")`).Exists())
+	require.NotContains(t, gjson.Get(textAfterImage, "instructions").String(), codexImageGenerationBridgeMarker)
+	require.False(t, gjson.Get(textAfterImage, "parallel_tool_calls").Bool())
+	require.False(t, gjson.Get(textAfterImage, "previous_response_id").Exists())
 }
 
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_DedicatedModeDoesNotReuseConnAcrossSessions(t *testing.T) {
